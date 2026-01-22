@@ -11,6 +11,7 @@ import type { RateLimiter } from '../browser/rate-limiter.js';
 import type { Job, JobSearchParams } from '../types/job.js';
 import type { Company } from '../types/company.js';
 import { OktyvErrorCode, type OktyvError } from '../types/mcp.js';
+import { extractJobListings, scrollToLoadMore } from '../tools/linkedin-search.js';
 
 const logger = createLogger('linkedin-connector');
 
@@ -97,14 +98,50 @@ export class LinkedInConnector {
     // Ensure logged in
     await this.ensureLoggedIn();
 
-    // TODO: Implement actual job search logic
-    logger.warn('Job search not yet implemented');
+    // Get session
+    const session = await this.sessionManager.getSession({
+      platform: this.platform,
+      headless: true,
+    });
 
-    throw {
-      code: OktyvErrorCode.NOT_IMPLEMENTED,
-      message: 'LinkedIn job search implementation in progress',
-      retryable: false,
-    } as OktyvError;
+    try {
+      // Navigate to search with parameters
+      const searchUrl = this.buildJobSearchUrl(params);
+      
+      await this.sessionManager.navigate(this.platform, {
+        url: searchUrl,
+        waitForSelector: '.jobs-search__results-list',
+        timeout: 30000,
+      });
+
+      // Scroll to load more results if needed
+      const targetCount = params.limit || 10;
+      if (targetCount > 10) {
+        await scrollToLoadMore(session.page, targetCount);
+      }
+
+      // Extract job listings
+      const jobs = await extractJobListings(session.page, params);
+
+      logger.info('Job search complete', { count: jobs.length });
+      return jobs;
+
+    } catch (error) {
+      logger.error('Job search failed', { error });
+      
+      // If it's already an OktyvError, rethrow it
+      if (error && typeof error === 'object' && 'code' in error) {
+        throw error;
+      }
+
+      // Otherwise wrap in PARSE_ERROR
+      throw {
+        code: OktyvErrorCode.PARSE_ERROR,
+        message: 'Failed to search LinkedIn jobs',
+        details: error,
+        retryable: true,
+      } as OktyvError;
+    }
   }
 
   /**
