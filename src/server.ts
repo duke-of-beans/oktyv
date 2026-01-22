@@ -12,13 +12,19 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { createLogger } from './utils/logger.js';
-import type { BrowserSession } from './types/index.js';
+import { BrowserSessionManager } from './browser/session.js';
+import { RateLimiter } from './browser/rate-limiter.js';
+import { LinkedInConnector } from './connectors/linkedin.js';
+import type { JobSearchParams } from './types/job.js';
+import { OktyvErrorCode } from './types/mcp.js';
 
 const logger = createLogger('server');
 
 export class OktyvServer {
   private server: Server;
-  private sessions: Map<string, BrowserSession>;
+  private sessionManager: BrowserSessionManager;
+  private rateLimiter: RateLimiter;
+  private linkedInConnector: LinkedInConnector;
 
   constructor() {
     this.server = new Server(
@@ -33,7 +39,10 @@ export class OktyvServer {
       }
     );
 
-    this.sessions = new Map();
+    // Initialize browser infrastructure
+    this.sessionManager = new BrowserSessionManager();
+    this.rateLimiter = new RateLimiter();
+    this.linkedInConnector = new LinkedInConnector(this.sessionManager, this.rateLimiter);
 
     // Register handlers
     this.setupHandlers();
@@ -139,67 +148,182 @@ export class OktyvServer {
     });
   }
 
-  private async handleLinkedInSearchJobs(_args: any): Promise<any> {
-    // TODO: Implement LinkedIn job search
-    logger.warn('linkedin_search_jobs not yet implemented');
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            success: false,
-            error: {
-              code: 'NOT_IMPLEMENTED',
-              message: 'LinkedIn job search is not yet implemented',
-              retryable: false,
-            },
-          }, null, 2),
-        },
-      ],
-    };
+  private async handleLinkedInSearchJobs(args: any): Promise<any> {
+    try {
+      logger.info('Handling linkedin_search_jobs', { args });
+
+      // Parse and validate parameters
+      const params: JobSearchParams = {
+        keywords: args.keywords,
+        location: args.location,
+        remote: args.remote,
+        jobType: args.jobType,
+        experienceLevel: args.experienceLevel,
+        salaryMin: args.salaryMin,
+        postedWithin: args.postedWithin,
+        limit: args.limit || 10,
+        offset: args.offset || 0,
+      };
+
+      // Call connector
+      const jobs = await this.linkedInConnector.searchJobs(params);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result: {
+                jobs,
+                totalCount: jobs.length, // TODO: Get actual total from LinkedIn
+                hasMore: jobs.length >= (params.limit || 10),
+                nextOffset: (params.offset || 0) + jobs.length,
+                query: params,
+                searchedAt: new Date(),
+                platform: 'LINKEDIN',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('LinkedIn job search failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
   }
 
-  private async handleLinkedInGetJob(_args: any): Promise<any> {
-    // TODO: Implement LinkedIn job fetch
-    logger.warn('linkedin_get_job not yet implemented');
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            success: false,
-            error: {
-              code: 'NOT_IMPLEMENTED',
-              message: 'LinkedIn job fetch is not yet implemented',
-              retryable: false,
+  private async handleLinkedInGetJob(args: any): Promise<any> {
+    try {
+      logger.info('Handling linkedin_get_job', { args });
+
+      const { jobId, includeCompany = false } = args;
+
+      if (!jobId) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: {
+                  code: OktyvErrorCode.INVALID_PARAMETERS,
+                  message: 'jobId is required',
+                  retryable: false,
+                },
+              }, null, 2),
             },
-          }, null, 2),
-        },
-      ],
-    };
+          ],
+        };
+      }
+
+      // Call connector
+      const result = await this.linkedInConnector.getJob(jobId, includeCompany);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('LinkedIn job fetch failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
   }
 
-  private async handleLinkedInGetCompany(_args: any): Promise<any> {
-    // TODO: Implement LinkedIn company fetch
-    logger.warn('linkedin_get_company not yet implemented');
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            success: false,
-            error: {
-              code: 'NOT_IMPLEMENTED',
-              message: 'LinkedIn company fetch is not yet implemented',
-              retryable: false,
+  private async handleLinkedInGetCompany(args: any): Promise<any> {
+    try {
+      logger.info('Handling linkedin_get_company', { args });
+
+      const { companyId } = args;
+
+      if (!companyId) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: {
+                  code: OktyvErrorCode.INVALID_PARAMETERS,
+                  message: 'companyId is required',
+                  retryable: false,
+                },
+              }, null, 2),
             },
-          }, null, 2),
-        },
-      ],
-    };
+          ],
+        };
+      }
+
+      // Call connector
+      const company = await this.linkedInConnector.getCompany(companyId);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result: company,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('LinkedIn company fetch failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
   }
 
   async connect(transport: StdioServerTransport): Promise<void> {
@@ -210,19 +334,9 @@ export class OktyvServer {
   async close(): Promise<void> {
     logger.info('Closing server and cleaning up sessions...');
     
-    // Close all browser sessions
-    for (const [platform, session] of this.sessions) {
-      try {
-        if (session.browser) {
-          await session.browser.close();
-          logger.info('Closed browser session', { platform });
-        }
-      } catch (error) {
-        logger.error('Error closing browser session', { platform, error });
-      }
-    }
+    // Close all browser sessions via session manager
+    await this.sessionManager.closeAllSessions();
     
-    this.sessions.clear();
     await this.server.close();
     logger.info('Server closed');
   }
