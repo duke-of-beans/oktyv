@@ -3,3 +3,4 @@
  */
 
 export * from './linkedin-search.js';
+export * from './linkedin-job.js';
