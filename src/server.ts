@@ -17,6 +17,7 @@ import { RateLimiter } from './browser/rate-limiter.js';
 import { LinkedInConnector } from './connectors/linkedin.js';
 import { IndeedConnector } from './connectors/indeed.js';
 import { WellfoundConnector } from './connectors/wellfound.js';
+import { GenericBrowserConnector } from './connectors/generic.js';
 import type { JobSearchParams } from './types/job.js';
 import { OktyvErrorCode } from './types/mcp.js';
 
@@ -29,6 +30,7 @@ export class OktyvServer {
   private linkedInConnector: LinkedInConnector;
   private indeedConnector: IndeedConnector;
   private wellfoundConnector: WellfoundConnector;
+  private genericConnector: GenericBrowserConnector;
 
   constructor() {
     this.server = new Server(
@@ -49,6 +51,7 @@ export class OktyvServer {
     this.linkedInConnector = new LinkedInConnector(this.sessionManager, this.rateLimiter);
     this.indeedConnector = new IndeedConnector(this.sessionManager, this.rateLimiter);
     this.wellfoundConnector = new WellfoundConnector(this.sessionManager, this.rateLimiter);
+    this.genericConnector = new GenericBrowserConnector(this.sessionManager, this.rateLimiter);
 
     // Register handlers
     this.setupHandlers();
@@ -243,6 +246,153 @@ export class OktyvServer {
               required: ['companySlug'],
             },
           },
+          {
+            name: 'browser_navigate',
+            description: 'Navigate to any URL in the browser',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                url: {
+                  type: 'string',
+                  description: 'URL to navigate to',
+                },
+                waitForSelector: {
+                  type: 'string',
+                  description: 'CSS selector to wait for after navigation (optional)',
+                },
+                timeout: {
+                  type: 'number',
+                  description: 'Timeout in milliseconds (default: 30000)',
+                },
+              },
+              required: ['url'],
+            },
+          },
+          {
+            name: 'browser_click',
+            description: 'Click on an element using a CSS selector',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                selector: {
+                  type: 'string',
+                  description: 'CSS selector of element to click',
+                },
+                waitForNavigation: {
+                  type: 'boolean',
+                  description: 'Wait for page navigation after click (default: false)',
+                },
+                timeout: {
+                  type: 'number',
+                  description: 'Timeout in milliseconds (default: 10000)',
+                },
+              },
+              required: ['selector'],
+            },
+          },
+          {
+            name: 'browser_type',
+            description: 'Type text into an input field',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                selector: {
+                  type: 'string',
+                  description: 'CSS selector of input field',
+                },
+                text: {
+                  type: 'string',
+                  description: 'Text to type',
+                },
+                delay: {
+                  type: 'number',
+                  description: 'Delay between keystrokes in ms (default: 50)',
+                },
+                clear: {
+                  type: 'boolean',
+                  description: 'Clear existing text first (default: false)',
+                },
+              },
+              required: ['selector', 'text'],
+            },
+          },
+          {
+            name: 'browser_extract',
+            description: 'Extract data from page using CSS selectors',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                selectors: {
+                  type: 'object',
+                  description: 'Map of keys to CSS selectors (e.g., {"title": "h1", "price": ".price"})',
+                },
+                multiple: {
+                  type: 'boolean',
+                  description: 'Extract from all matching elements (default: false)',
+                },
+              },
+              required: ['selectors'],
+            },
+          },
+          {
+            name: 'browser_screenshot',
+            description: 'Capture a screenshot of the current page',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                fullPage: {
+                  type: 'boolean',
+                  description: 'Capture full scrollable page (default: false)',
+                },
+                selector: {
+                  type: 'string',
+                  description: 'CSS selector of specific element to screenshot (optional)',
+                },
+              },
+              required: [],
+            },
+          },
+          {
+            name: 'browser_pdf',
+            description: 'Generate a PDF of the current page',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                format: {
+                  type: 'string',
+                  description: 'Paper format: Letter, Legal, or A4 (default: Letter)',
+                  enum: ['Letter', 'Legal', 'A4'],
+                },
+                landscape: {
+                  type: 'boolean',
+                  description: 'Use landscape orientation (default: false)',
+                },
+              },
+              required: [],
+            },
+          },
+          {
+            name: 'browser_form_fill',
+            description: 'Fill out a form with provided data',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                fields: {
+                  type: 'object',
+                  description: 'Map of CSS selectors to values (e.g., {"#email": "user@example.com"})',
+                },
+                submitSelector: {
+                  type: 'string',
+                  description: 'CSS selector of submit button (optional)',
+                },
+                submitWaitForNavigation: {
+                  type: 'boolean',
+                  description: 'Wait for navigation after submit (default: false)',
+                },
+              },
+              required: ['fields'],
+            },
+          },
         ],
       };
     });
@@ -281,6 +431,27 @@ export class OktyvServer {
 
           case 'wellfound_get_company':
             return await this.handleWellfoundGetCompany(args);
+
+          case 'browser_navigate':
+            return await this.handleBrowserNavigate(args);
+
+          case 'browser_click':
+            return await this.handleBrowserClick(args);
+
+          case 'browser_type':
+            return await this.handleBrowserType(args);
+
+          case 'browser_extract':
+            return await this.handleBrowserExtract(args);
+
+          case 'browser_screenshot':
+            return await this.handleBrowserScreenshot(args);
+
+          case 'browser_pdf':
+            return await this.handleBrowserPdf(args);
+
+          case 'browser_form_fill':
+            return await this.handleBrowserFormFill(args);
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -807,6 +978,398 @@ export class OktyvServer {
       };
     } catch (error: any) {
       logger.error('Wellfound company fetch failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleBrowserNavigate(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_navigate', { args });
+
+      const { url, waitForSelector, timeout } = args;
+
+      if (!url) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: {
+                  code: OktyvErrorCode.INVALID_PARAMETERS,
+                  message: 'url is required',
+                  retryable: false,
+                },
+              }, null, 2),
+            },
+          ],
+        };
+      }
+
+      await this.genericConnector.navigate(url, { waitForSelector, timeout });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result: {
+                url,
+                message: 'Navigation successful',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('Browser navigate failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleBrowserClick(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_click', { args });
+
+      const { selector, waitForNavigation, timeout } = args;
+
+      if (!selector) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: {
+                  code: OktyvErrorCode.INVALID_PARAMETERS,
+                  message: 'selector is required',
+                  retryable: false,
+                },
+              }, null, 2),
+            },
+          ],
+        };
+      }
+
+      await this.genericConnector.click(selector, { waitForNavigation, timeout });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result: {
+                selector,
+                message: 'Click successful',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('Browser click failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleBrowserType(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_type', { args });
+
+      const { selector, text, delay, clear } = args;
+
+      if (!selector || !text) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: {
+                  code: OktyvErrorCode.INVALID_PARAMETERS,
+                  message: 'selector and text are required',
+                  retryable: false,
+                },
+              }, null, 2),
+            },
+          ],
+        };
+      }
+
+      await this.genericConnector.type(selector, text, { delay, clear });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result: {
+                selector,
+                textLength: text.length,
+                message: 'Type successful',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('Browser type failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleBrowserExtract(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_extract', { args });
+
+      const { selectors, multiple } = args;
+
+      if (!selectors || typeof selectors !== 'object') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: {
+                  code: OktyvErrorCode.INVALID_PARAMETERS,
+                  message: 'selectors object is required',
+                  retryable: false,
+                },
+              }, null, 2),
+            },
+          ],
+        };
+      }
+
+      const data = await this.genericConnector.extract(selectors, { multiple });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result: data,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('Browser extract failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleBrowserScreenshot(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_screenshot', { args });
+
+      const { fullPage, selector } = args;
+
+      const base64Image = await this.genericConnector.screenshot({ fullPage, selector });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result: {
+                image: base64Image,
+                format: 'png',
+                encoding: 'base64',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('Browser screenshot failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleBrowserPdf(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_pdf', { args });
+
+      const { format, landscape } = args;
+
+      const base64Pdf = await this.genericConnector.generatePdf({ format, landscape });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result: {
+                pdf: base64Pdf,
+                format: format || 'Letter',
+                encoding: 'base64',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('Browser PDF generation failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleBrowserFormFill(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_form_fill', { args });
+
+      const { fields, submitSelector, submitWaitForNavigation } = args;
+
+      if (!fields || typeof fields !== 'object') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: {
+                  code: OktyvErrorCode.INVALID_PARAMETERS,
+                  message: 'fields object is required',
+                  retryable: false,
+                },
+              }, null, 2),
+            },
+          ],
+        };
+      }
+
+      await this.genericConnector.fillForm(fields, { submitSelector, submitWaitForNavigation });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result: {
+                fieldsCount: Object.keys(fields).length,
+                submitted: !!submitSelector,
+                message: 'Form fill successful',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('Browser form fill failed', { error });
 
       return {
         content: [
