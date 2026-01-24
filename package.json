@@ -1,8 +1,11 @@
 {
   "name": "oktyv",
-  "version": "0.1.0-alpha.1",
-  "description": "Browser automation MCP server for career platform integration",
+  "version": "0.2.0-alpha.1",
+  "description": "Universal browser automation platform with MCP server and CLI",
   "main": "dist/index.js",
+  "bin": {
+    "oktyv": "dist/cli/index.js"
+  },
   "type": "module",
   "scripts": {
     "build": "tsc",
@@ -33,6 +36,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.5",
+    "commander": "^12.1.0",
     "puppeteer": "^23.10.4",
     "winston": "^3.17.0",
     "zod": "^3.24.1"
