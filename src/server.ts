@@ -16,6 +16,7 @@ import { BrowserSessionManager } from './browser/session.js';
 import { RateLimiter } from './browser/rate-limiter.js';
 import { LinkedInConnector } from './connectors/linkedin.js';
 import { IndeedConnector } from './connectors/indeed.js';
+import { WellfoundConnector } from './connectors/wellfound.js';
 import type { JobSearchParams } from './types/job.js';
 import { OktyvErrorCode } from './types/mcp.js';
 
@@ -27,6 +28,7 @@ export class OktyvServer {
   private rateLimiter: RateLimiter;
   private linkedInConnector: LinkedInConnector;
   private indeedConnector: IndeedConnector;
+  private wellfoundConnector: WellfoundConnector;
 
   constructor() {
     this.server = new Server(
@@ -46,6 +48,7 @@ export class OktyvServer {
     this.rateLimiter = new RateLimiter();
     this.linkedInConnector = new LinkedInConnector(this.sessionManager, this.rateLimiter);
     this.indeedConnector = new IndeedConnector(this.sessionManager, this.rateLimiter);
+    this.wellfoundConnector = new WellfoundConnector(this.sessionManager, this.rateLimiter);
 
     // Register handlers
     this.setupHandlers();
@@ -180,6 +183,66 @@ export class OktyvServer {
               required: ['companyName'],
             },
           },
+          {
+            name: 'wellfound_search_jobs',
+            description: 'Search for jobs on Wellfound (formerly AngelList Talent) - startup-focused job board',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                keywords: {
+                  type: 'string',
+                  description: 'Job title, skills, or keywords to search for',
+                },
+                location: {
+                  type: 'string',
+                  description: 'City, state, or country',
+                },
+                remote: {
+                  type: 'boolean',
+                  description: 'Filter for remote positions only',
+                },
+                limit: {
+                  type: 'number',
+                  description: 'Maximum number of results (default: 10)',
+                  minimum: 1,
+                  maximum: 50,
+                },
+              },
+              required: [],
+            },
+          },
+          {
+            name: 'wellfound_get_job',
+            description: 'Get detailed information about a specific job posting on Wellfound',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                jobSlug: {
+                  type: 'string',
+                  description: 'Wellfound job slug (from search results)',
+                },
+                includeCompany: {
+                  type: 'boolean',
+                  description: 'Whether to fetch company details (default: false)',
+                },
+              },
+              required: ['jobSlug'],
+            },
+          },
+          {
+            name: 'wellfound_get_company',
+            description: 'Get detailed information about a company on Wellfound, including funding info',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                companySlug: {
+                  type: 'string',
+                  description: 'Wellfound company slug',
+                },
+              },
+              required: ['companySlug'],
+            },
+          },
         ],
       };
     });
@@ -209,6 +272,15 @@ export class OktyvServer {
 
           case 'indeed_get_company':
             return await this.handleIndeedGetCompany(args);
+
+          case 'wellfound_search_jobs':
+            return await this.handleWellfoundSearchJobs(args);
+
+          case 'wellfound_get_job':
+            return await this.handleWellfoundGetJob(args);
+
+          case 'wellfound_get_company':
+            return await this.handleWellfoundGetCompany(args);
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -557,6 +629,184 @@ export class OktyvServer {
       };
     } catch (error: any) {
       logger.error('Indeed company fetch failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleWellfoundSearchJobs(args: any): Promise<any> {
+    try {
+      logger.info('Handling wellfound_search_jobs', { args });
+
+      // Parse and validate parameters
+      const params: JobSearchParams = {
+        keywords: args.keywords,
+        location: args.location,
+        remote: args.remote,
+        jobType: args.jobType,
+        experienceLevel: args.experienceLevel,
+        salaryMin: args.salaryMin,
+        postedWithin: args.postedWithin,
+        limit: args.limit || 10,
+        offset: args.offset || 0,
+      };
+
+      // Call connector
+      const jobs = await this.wellfoundConnector.searchJobs(params);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result: {
+                jobs,
+                totalCount: jobs.length,
+                hasMore: jobs.length >= (params.limit || 10),
+                nextOffset: (params.offset || 0) + jobs.length,
+                query: params,
+                searchedAt: new Date(),
+                platform: 'WELLFOUND',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('Wellfound job search failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleWellfoundGetJob(args: any): Promise<any> {
+    try {
+      logger.info('Handling wellfound_get_job', { args });
+
+      const { jobSlug, includeCompany = false } = args;
+
+      if (!jobSlug) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: {
+                  code: OktyvErrorCode.INVALID_PARAMETERS,
+                  message: 'jobSlug is required',
+                  retryable: false,
+                },
+              }, null, 2),
+            },
+          ],
+        };
+      }
+
+      // Call connector
+      const result = await this.wellfoundConnector.getJob(jobSlug, includeCompany);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('Wellfound job fetch failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'An unknown error occurred',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleWellfoundGetCompany(args: any): Promise<any> {
+    try {
+      logger.info('Handling wellfound_get_company', { args });
+
+      const { companySlug } = args;
+
+      if (!companySlug) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: {
+                  code: OktyvErrorCode.INVALID_PARAMETERS,
+                  message: 'companySlug is required',
+                  retryable: false,
+                },
+              }, null, 2),
+            },
+          ],
+        };
+      }
+
+      // Call connector
+      const company = await this.wellfoundConnector.getCompany(companySlug);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result: company,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('Wellfound company fetch failed', { error });
 
       return {
         content: [
