@@ -7,9 +7,11 @@ identity:
   name: "Oktyv"
   tagline: "Complete, production-grade authoritative agent browser automation system"
   purpose: |
-    Authoritative agent for intelligent web interaction and complex web tasks.
-    Autonomous browser automation with session management, intelligent navigation,
-    and structured data extraction across any web platform.
+    Universal automation layer giving AI agents the ability to ACT on the real world.
+    Complete automation infrastructure with 7 core engines: Browser, API, Database,
+    Email, File, Cron, and Credential Vault. Oktyv is the "hands" of all AI products,
+    enabling autonomous web interaction, API orchestration, data persistence, and
+    scheduled workflows across any platform.
   philosophy: |
     Option B Perfection - Build complete product first time, not MVP iterations.
     Foundation Out - Build backend infrastructure before surface features.
@@ -19,8 +21,8 @@ identity:
 
 current_state:
   version: "0.1.0-alpha.1"
-  phase: "Foundation"
-  phase_description: "Core architecture, TypeScript setup, documentation structure"
+  phase: "Phase 1: Browser Engine"
+  phase_description: "Core MCP server + Browser automation (LinkedIn connector alpha)"
   health:
     build: "Not yet configured"
     tests: "Not yet written"
@@ -44,20 +46,24 @@ architecture:
   
 boundaries:
   does:
-    - "Autonomous browser automation via Puppeteer"
-    - "Intelligent web navigation and interaction"
-    - "Session persistence (stays logged in)"
+    - "Browser automation (Puppeteer) ✅ Phase 1"
+    - "API orchestration (HTTP/REST/GraphQL) 📋 Phase 2"
+    - "Database operations (SQL/NoSQL) 📋 Phase 3"
+    - "Email automation (send/receive/parse) 📋 Phase 4"
+    - "File operations (local + cloud storage) 📋 Phase 5"
+    - "Scheduled automation (cron) 📋 Phase 6"
+    - "Credential vault (encrypted storage) 📋 Phase 7"
+    - "Workflow orchestration (multi-engine) 📋 Phase 8"
+    - "Session persistence across restarts"
     - "Platform-specific connectors (LinkedIn, Indeed, etc.)"
-    - "Generic web automation framework"
-    - "Rate limiting per platform"
-    - "Structured data extraction"
+    - "Rate limiting per platform/engine"
     - "Error recovery and retry logic"
   does_not:
-    - "Store user credentials"
-    - "Manage application state"
+    - "Store user credentials in plain text"
+    - "Manage application state (that's GREGORE)"
     - "Provide AI analysis (that's Claude's job)"
     - "Replace domain-specific systems"
-    - "Bundle as KERNL plugin"
+    - "Bundle as KERNL plugin (standalone MCP server)"
     - "Run as browser extension"
 
 interfaces:
@@ -126,44 +132,92 @@ performance_targets:
   concurrent_sessions: "1-3 browsers"
 
 milestones:
-  foundation:
-    status: "COMPLETE"
-    started: "2026-01-22"
-    completed: "2026-01-22"
-    deliverables:
-      - "✅ Git repository initialized"
-      - "✅ Project registered with KERNL"
-      - "✅ README.md created"
-      - "✅ ARCHITECTURE.md created"
-      - "✅ package.json configured"
-      - "✅ tsconfig.json configured"
-      - "✅ Source directory structure"
-      - "✅ Type definitions"
-      - "✅ MCP server skeleton"
-      - "✅ Initial git commit and push to GitHub"
-      
-  linkedin_connector:
+  phase_1_browser_engine:
     status: "IN_PROGRESS"
+    started: "2026-01-22"
+    target: "2026 Q1"
     deliverables:
-      - "Browser session manager"
-      - "LinkedIn connector base"
-      - "linkedin_search_jobs tool"
-      - "linkedin_get_job tool"
-      - "linkedin_get_company tool"
-      - "Rate limiter implementation"
-      - "Error handling system"
-      - "Unit tests"
-      - "Integration tests"
+      - "✅ MCP server scaffolding"
+      - "✅ Puppeteer integration"
+      - "✅ Session management (cookies)"
+      - "✅ LinkedIn connector (search, jobs, company)"
+      - "✅ Rate limiting (token bucket)"
+      - "✅ Error handling system"
+      - "✅ Git repository and GitHub remote"
+      - "[ ] Indeed connector"
+      - "[ ] Wellfound connector"
+      - "[ ] Unit/integration tests"
+      - "[ ] Real-world validation"
       
-  production_ready:
+  phase_2_api_engine:
     status: "PLANNED"
+    target: "2026 Q2"
     deliverables:
-      - "Complete LinkedIn implementation"
-      - "Indeed connector"
-      - "Comprehensive documentation"
-      - "Claude Desktop integration guide"
-      - "Performance optimization"
-      - "v1.0.0 release"
+      - "Universal HTTP/REST client"
+      - "OAuth 2.0 flows (Google, GitHub, etc.)"
+      - "Auto-pagination handling"
+      - "GraphQL support"
+      - "Per-endpoint rate limiting"
+      
+  phase_3_database_engine:
+    status: "PLANNED"
+    target: "2026 Q3"
+    deliverables:
+      - "Prisma integration"
+      - "PostgreSQL, MySQL, SQLite support"
+      - "MongoDB (NoSQL) support"
+      - "Transaction handling"
+      - "Backup/restore utilities"
+      
+  phase_4_email_engine:
+    status: "PLANNED"
+    target: "2026 Q3"
+    deliverables:
+      - "Nodemailer integration"
+      - "Gmail/Outlook SMTP"
+      - "Inbox search and parsing"
+      - "Attachment handling"
+      - "Template rendering"
+      
+  phase_5_file_engine:
+    status: "PLANNED"
+    target: "2026 Q4"
+    deliverables:
+      - "Local file operations"
+      - "S3, Google Drive, Dropbox integration"
+      - "Format conversion (PDF, DOCX, XLSX, CSV)"
+      - "Archive operations (ZIP, TAR)"
+      
+  phase_6_cron_engine:
+    status: "PLANNED"
+    target: "2026 Q4"
+    deliverables:
+      - "node-cron integration"
+      - "Cron syntax support"
+      - "Recurring and one-time tasks"
+      - "Task persistence"
+      - "Timezone support"
+      
+  phase_7_credential_vault:
+    status: "PLANNED"
+    target: "2027 Q1"
+    deliverables:
+      - "AES-256 encryption"
+      - "OS keychain integration"
+      - "Secure storage/retrieval"
+      - "Auto-rotation (optional)"
+      - "Export/import (encrypted)"
+      
+  phase_8_orchestration:
+    status: "PLANNED"
+    target: "2027 Q2"
+    deliverables:
+      - "Multi-engine workflows"
+      - "Conditional logic"
+      - "Error recovery"
+      - "Parallel execution (unlocks TESSRYX Phase 2!)"
+      - "Workflow templates"
+      - "Monitoring/observability"
 
 future_phases:
   phase_2:
