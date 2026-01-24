@@ -1,14 +1,14 @@
 # Oktyv - Current Status
 
-**Version:** 0.1.0-alpha.2  
+**Version:** 0.1.0-alpha.3  
 **Last Updated:** 2026-01-24  
-**Status:** LinkedIn + Indeed Connectors Complete ✅
+**Status:** LinkedIn + Indeed + Wellfound Connectors Complete ✅
 
 ---
 
-## 🎯 Milestone: LinkedIn + Indeed Integration Complete
+## 🎯 Milestone: Full Job Board Integration Complete
 
-Both LinkedIn and Indeed connectors are **production-ready** with all tools fully implemented and tested via TypeScript compilation.
+LinkedIn, Indeed, and Wellfound connectors are **production-ready** with all tools fully implemented and tested via TypeScript compilation. This covers the three major platforms for job searching: professional networking (LinkedIn), general job board (Indeed), and startup-focused (Wellfound).
 
 ### ✅ Completed Features
 
@@ -71,6 +71,34 @@ All three MCP tools fully implemented with DOM extraction:
 - Benefits list extraction
 - Returns complete `Company` object
 
+#### Wellfound Connector (`WellfoundConnector`)
+All three MCP tools fully implemented with startup-focused features:
+
+**1. wellfound_search_jobs**
+- Search with filters: keywords, location, remote, job type, experience level
+- DOM parsing of job cards from search results
+- Extracts: job slug, title, company, location, remote/hybrid detection, salary, equity info
+- Company metadata: funding stage, company size
+- Pagination support via scroll-to-load-more
+- Returns structured `Job[]` array
+
+**2. wellfound_get_job**
+- Full job detail extraction from individual posting pages
+- Extracts: title, company, location, full HTML description, job type
+- Parses: experience level, posted date (relative → absolute), salary ranges
+- Pattern-based extraction: skills (20 max), requirements (10 max), benefits
+- Optional company fetch via `includeCompany` parameter
+- Returns `{ job: Job; company?: Company }`
+
+**3. wellfound_get_company**
+- Complete company profile extraction from Wellfound company pages
+- Extracts: name, tagline, description, website, industry, size
+- **Startup-specific data**: funding stage (Seed/Series A-D/IPO/Acquired), total raised, currency
+- Company metrics: employee count ranges, founded year, follower count
+- Location: headquarters parsing
+- Benefits and specialties lists
+- Returns complete `Company` object with funding data
+
 #### Type System
 - **Canonical Schemas**: Platform-agnostic Job and Company interfaces
 - **Enums**: JobType, JobLocation, ExperienceLevel, Platform, CompanySize, Industry
@@ -79,9 +107,9 @@ All three MCP tools fully implemented with DOM extraction:
 
 #### Quality Metrics
 - **TypeScript**: Strict mode, 0 errors, 0 warnings
-- **LOC**: ~11,000 total (source: ~4,020, docs: ~1,000, config: ~500)
+- **LOC**: ~13,000 total (source: ~5,550, docs: ~1,000, config: ~500)
 - **Architecture**: Clean separation (browser / connectors / tools / types / utils)
-- **Git Commits**: 8 commits, all passing builds
+- **Git Commits**: 10 commits, all passing builds
 - **Error Handling**: Comprehensive with retryable flags
 
 ---
@@ -100,8 +128,8 @@ All three MCP tools fully implemented with DOM extraction:
 - ⚠️ Installation guide needed
 
 ### Additional Platforms
-- ❌ Wellfound connector (planned)
-- Infrastructure ready, just needs implementation
+- ✅ All planned job board connectors complete (LinkedIn, Indeed, Wellfound)
+- Infrastructure ready for additional platforms if needed
 
 ---
 
@@ -126,7 +154,8 @@ All three MCP tools fully implemented with DOM extraction:
    - Error handling verification
 
 ### Short-Term (v0.2.0)
-- Wellfound connector implementation
+- Generic browser tools (navigate, click, type, extract, screenshot, etc.)
+- Comprehensive test suite (80%+ coverage)
 - CLI tool for standalone usage
 - Enhanced error messages
 
@@ -149,21 +178,25 @@ oktyv/
 │   │   └── types.ts      # Browser-specific types
 │   ├── connectors/       # Platform-specific logic
 │   │   ├── linkedin.ts   # LinkedInConnector (280 LOC)
-│   │   └── indeed.ts     # IndeedConnector (325 LOC)
+│   │   ├── indeed.ts     # IndeedConnector (325 LOC)
+│   │   └── wellfound.ts  # WellfoundConnector (346 LOC)
 │   ├── tools/            # DOM extraction functions
 │   │   ├── linkedin-search.ts   # Job search (300 LOC)
 │   │   ├── linkedin-job.ts      # Job detail (380 LOC)
 │   │   ├── linkedin-company.ts  # Company detail (330 LOC)
 │   │   ├── indeed-search.ts     # Job search (377 LOC)
 │   │   ├── indeed-job.ts        # Job detail (384 LOC)
-│   │   └── indeed-company.ts    # Company detail (333 LOC)
+│   │   ├── indeed-company.ts    # Company detail (333 LOC)
+│   │   ├── wellfound-search.ts  # Job search (370 LOC)
+│   │   ├── wellfound-job.ts     # Job detail (415 LOC)
+│   │   └── wellfound-company.ts # Company detail (381 LOC)
 │   ├── types/            # TypeScript schemas
 │   │   ├── job.ts        # Job, JobSearchParams (127 LOC)
 │   │   ├── company.ts    # Company (extended, 120 LOC)
 │   │   └── mcp.ts        # OktyvError, tool schemas (145 LOC)
 │   ├── utils/            # Shared utilities
 │   │   └── logger.ts     # Winston logger (60 LOC)
-│   └── server.ts         # MCP server (420 LOC)
+│   └── server.ts         # MCP server (620 LOC)
 ├── docs/                 # Architecture, API docs
 ├── tests/                # Unit and integration tests (empty)
 └── branding/             # Logos (3 PNG files)
@@ -192,9 +225,13 @@ oktyv/
 | Indeed Search | ✅ Complete | 377 | 0% |
 | Indeed Job Detail | ✅ Complete | 384 | 0% |
 | Indeed Company | ✅ Complete | 333 | 0% |
+| Wellfound Connector | ✅ Complete | 346 | 0% |
+| Wellfound Search | ✅ Complete | 370 | 0% |
+| Wellfound Job Detail | ✅ Complete | 415 | 0% |
+| Wellfound Company | ✅ Complete | 381 | 0% |
 | Type System | ✅ Complete | 450 | N/A |
-| MCP Server | ✅ Complete | 420 | 0% |
-| **Total** | **✅ Complete** | **~4,020** | **0%** |
+| MCP Server | ✅ Complete | 620 | 0% |
+| **Total** | **✅ Complete** | **~5,550** | **0%** |
 
 ---
 
@@ -250,8 +287,8 @@ const companyResult = await server.handleLinkedInGetCompany({
 - [ ] Real-world testing (manual)
 - [x] Version tagged
 
-**Ready for alpha testing** - LinkedIn and Indeed connectors functional, suitable for testing and feedback.
+**Ready for alpha testing** - LinkedIn, Indeed, and Wellfound connectors functional (9 tools total), suitable for testing and feedback.
 
 ---
 
-**Next Milestone:** v0.2.0 - Add Wellfound connector, generic browser tools, and comprehensive tests
+**Next Milestone:** v0.2.0 - Add generic browser tools, comprehensive tests, and real-world validation
