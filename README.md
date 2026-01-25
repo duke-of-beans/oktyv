@@ -3,9 +3,10 @@
 **Version:** 1.0.0 🎉  
 **Status:** PRODUCTION READY ✅  
 **Test Coverage:** 258 tests, 100% passing  
-**Production Hardening:** Complete (Load Testing, Security Audit, Performance Optimization, Monitoring, Error Recovery)
+**Production Hardening:** Complete (Load Testing, Security Audit, Performance Optimization, Monitoring, Error Recovery)  
+**Next Feature:** Parallel Execution Engine (Design Complete, Ready for Implementation)
 
-Oktyv is a comprehensive Model Context Protocol (MCP) server that provides a production-ready universal automation layer through 7 specialized engines. Built with TypeScript, hardened for production, powered by Option B Perfection philosophy.
+Oktyv is a comprehensive Model Context Protocol (MCP) server that provides a production-ready universal automation layer through 7 specialized engines plus an upcoming **Parallel Execution Engine** for concurrent multi-task automation. Built with TypeScript, hardened for production, powered by Option B Perfection philosophy.
 
 ## 🏗️ Architecture Overview
 
@@ -273,6 +274,83 @@ npm run test:recovery
 ```
 
 **Documentation:** See `docs/PRODUCTION_HARDENING.md` for complete guide.
+
+---
+
+## 🔮 Upcoming: Parallel Execution Engine
+
+**Status:** Design Complete, Ready for Implementation  
+**ETA:** 12-16 hours of development  
+**Documentation:** `docs/PARALLEL_EXECUTION_DESIGN.md`
+
+### What It Enables
+
+Execute multiple Oktyv operations **simultaneously** instead of sequentially:
+
+```typescript
+// Instead of this (SLOW - 36 seconds):
+await moveFiles();      // 18 seconds
+await fetchEmails();    // 18 seconds
+
+// Do this (FAST - 18 seconds):
+await parallel_execute({
+  tasks: [
+    { id: "move", tool: "file_move", params: {...} },
+    { id: "email", tool: "email_imap_fetch", params: {...} }
+  ]
+});
+// Both run at the same time!
+```
+
+### Key Features
+
+**DAG-Based Execution:**
+- Intelligent dependency management (task B waits for task A)
+- Topological sorting for optimal parallelism
+- Circular dependency detection
+- Variable substitution across tasks (`${taskId.result.field}`)
+
+**Smart Resource Management:**
+- Configurable concurrency limits
+- Automatic resource conflict detection
+- Connection pooling
+- Rate limiting per engine
+
+**Robust Error Handling:**
+- Partial success support
+- Configurable failure modes (continue/stop/rollback)
+- Retry policies per task
+- Comprehensive error reporting
+
+### Example: Job Application Automation
+
+```json
+{
+  "tasks": [
+    // Level 0: All search in parallel (10x faster!)
+    { "id": "linkedin", "tool": "linkedin_search_jobs", ... },
+    { "id": "indeed", "tool": "indeed_search_jobs", ... },
+    { "id": "wellfound", "tool": "wellfound_search_jobs", ... },
+    
+    // Level 1: Merge results (waits for all searches)
+    { 
+      "id": "merge",
+      "tool": "custom_merge",
+      "params": { "sources": ["${linkedin.result}", "${indeed.result}", "${wellfound.result}"] },
+      "dependsOn": ["linkedin", "indeed", "wellfound"]
+    },
+    
+    // Level 2: Save + Notify (parallel)
+    { "id": "save", "tool": "db_insert", "dependsOn": ["merge"] },
+    { "id": "notify", "tool": "email_smtp_send", "dependsOn": ["merge"] }
+  ]
+}
+```
+
+**Execution:** 3 parallel searches → merge → parallel save/notify  
+**Speedup:** ~10x faster than sequential
+
+See `docs/PARALLEL_EXECUTION_DESIGN.md` for complete specification.
 
 ---
 
