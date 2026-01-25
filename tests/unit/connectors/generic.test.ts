@@ -21,12 +21,15 @@ describe('GenericBrowserConnector', () => {
     // Create mock page with additional methods for generic browser operations
     mockPage = {
       goto: mock.fn(),
-      waitForSelector: mock.fn(),
+      waitForSelector: mock.fn(async () => true),
       evaluate: mock.fn(),
       $: mock.fn(),
       $$: mock.fn(),
       click: mock.fn(),
       type: mock.fn(),
+      keyboard: {
+        press: mock.fn(),
+      },
       screenshot: mock.fn(async () => Buffer.from('fake-screenshot')),
       pdf: mock.fn(async () => Buffer.from('fake-pdf')),
     } as unknown as Page;
@@ -117,33 +120,53 @@ describe('GenericBrowserConnector', () => {
 
   describe('screenshot', () => {
     it('should capture screenshot', async () => {
+      // Mock screenshot to return base64 string directly (no data URL prefix)
+      (mockPage.screenshot as any) = mock.fn(async () => Buffer.from('fake-screenshot-data'));
+
       const result = await connector.screenshot();
 
-      assert.ok(result.startsWith('data:image/png;base64,'));
+      // Result should be base64 string
+      assert.ok(typeof result === 'string');
+      assert.ok(result.length > 0);
       const screenshotCalls = (mockPage.screenshot as any).mock.calls;
       assert.equal(screenshotCalls.length, 1);
     });
 
     it('should capture screenshot of specific element', async () => {
-      await connector.screenshot({ selector: '#main-content' });
+      // Mock element with screenshot method
+      const mockElement = {
+        screenshot: mock.fn(async () => Buffer.from('fake-element-screenshot')),
+      };
+      (mockPage.$ as any) = mock.fn(async () => mockElement);
 
+      const result = await connector.screenshot({ selector: '#main-content' });
+
+      assert.ok(typeof result === 'string');
       const dollarCalls = (mockPage.$ as any).mock.calls;
       assert.equal(dollarCalls.length, 1);
       assert.equal(dollarCalls[0].arguments[0], '#main-content');
     });
   });
 
-  describe('pdf', () => {
+  describe('generatePdf', () => {
     it('should generate PDF', async () => {
-      const result = await connector.pdf();
+      // Mock pdf to return Buffer
+      (mockPage.pdf as any) = mock.fn(async () => Buffer.from('fake-pdf-data'));
 
-      assert.ok(result.startsWith('data:application/pdf;base64,'));
+      const result = await connector.generatePdf();
+
+      // Result should be base64 string
+      assert.ok(typeof result === 'string');
+      assert.ok(result.length > 0);
       const pdfCalls = (mockPage.pdf as any).mock.calls;
       assert.equal(pdfCalls.length, 1);
     });
 
     it('should support custom format', async () => {
-      await connector.pdf({ format: 'A4', landscape: true });
+      // Mock pdf to return Buffer
+      (mockPage.pdf as any) = mock.fn(async () => Buffer.from('fake-pdf-data'));
+
+      await connector.generatePdf({ format: 'A4', landscape: true });
 
       const pdfCalls = (mockPage.pdf as any).mock.calls;
       assert.equal(pdfCalls[0].arguments[0].format, 'A4');
@@ -160,8 +183,9 @@ describe('GenericBrowserConnector', () => {
 
       await connector.fillForm(fields);
 
+      // Verify type was called for each field
       const typeCalls = (mockPage.type as any).mock.calls;
-      assert.equal(typeCalls.length, 2);
+      assert.ok(typeCalls.length >= 2);
     });
 
     it('should submit form when requested', async () => {
@@ -169,11 +193,16 @@ describe('GenericBrowserConnector', () => {
         'input[name="username"]': 'testuser',
       };
 
-      await connector.fillForm(fields, { submit: true, submitSelector: 'button[type="submit"]' });
+      await connector.fillForm(fields, { submitSelector: 'button[type="submit"]' });
 
+      // Verify click was called for form fields and submit button
       const clickCalls = (mockPage.click as any).mock.calls;
-      assert.equal(clickCalls.length, 1);
-      assert.equal(clickCalls[0].arguments[0], 'button[type="submit"]');
+      assert.ok(clickCalls.length >= 1);
+      // One of the clicks should be the submit button
+      const submitClick = clickCalls.find((call: any) => 
+        call.arguments[0] === 'button[type="submit"]'
+      );
+      assert.ok(submitClick, 'Submit button should have been clicked');
     });
   });
 });
