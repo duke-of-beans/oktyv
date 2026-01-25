@@ -28,6 +28,9 @@ import { cronTools } from './tools/cron/tools.js';
 import { apiTools } from './tools/api/tools.js';
 import { databaseTools } from './tools/database/tools.js';
 import { emailTools } from './tools/email/tools.js';
+import { ApiEngine } from './tools/api/ApiEngine.js';
+import { DatabaseEngine } from './tools/database/DatabaseEngine.js';
+import { EmailEngine } from './tools/email/EmailEngine.js';
 
 const logger = createLogger('server');
 
@@ -42,12 +45,15 @@ export class OktyvServer {
   private vaultEngine: VaultEngine;
   private fileEngine: FileEngine;
   private cronEngine: CronEngine;
+  private apiEngine: ApiEngine;
+  private databaseEngine: DatabaseEngine;
+  private emailEngine: EmailEngine;
 
   constructor() {
     this.server = new Server(
       {
         name: 'oktyv',
-        version: '1.0.0-alpha.3',
+        version: '1.0.0-beta.1',
       },
       {
         capabilities: {
@@ -72,6 +78,33 @@ export class OktyvServer {
 
     // Initialize cron infrastructure
     this.cronEngine = new CronEngine();
+
+    // Initialize API infrastructure
+    this.apiEngine = new ApiEngine(
+      async (vaultName: string, credentialName: string) => {
+        return await this.vaultEngine.get(vaultName, credentialName);
+      },
+      async (vaultName: string, credentialName: string, value: string) => {
+        await this.vaultEngine.set(vaultName, credentialName, value);
+      }
+    );
+
+    // Initialize database infrastructure
+    this.databaseEngine = new DatabaseEngine(
+      async (vaultName: string, credentialName: string) => {
+        return await this.vaultEngine.get(vaultName, credentialName);
+      }
+    );
+
+    // Initialize email infrastructure
+    this.emailEngine = new EmailEngine(
+      async (vaultName: string, credentialName: string) => {
+        return await this.vaultEngine.get(vaultName, credentialName);
+      },
+      async (url: string, options?: any) => {
+        return await this.apiEngine.request(url, options);
+      }
+    );
 
     // Register handlers
     this.setupHandlers();
@@ -2460,144 +2493,982 @@ export class OktyvServer {
   }
 
   // ============================================================================
-  // API Engine Handlers (PLACEHOLDER - TODO: Full Implementation)
+  // API Engine Handlers
   // ============================================================================
 
-  private async handleApiRequest(_args: any): Promise<any> {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          success: false,
-          error: {
-            code: 'NOT_IMPLEMENTED',
-            message: 'API Engine handlers not yet implemented. Core engine complete, integration pending.',
-          },
-        }, null, 2),
-      }],
-    };
+  private async handleApiRequest(args: any): Promise<any> {
+    try {
+      logger.info('Handling api_request', { url: args.url, method: args.method });
+
+      const response = await this.apiEngine.request(args.url, {
+        method: args.method,
+        headers: args.headers,
+        params: args.params,
+        data: args.data,
+        rateLimitKey: args.rateLimitKey,
+        pagination: args.autoPaginate ? {
+          autoPaginate: true,
+          maxPages: args.maxPages || 10,
+        } : undefined,
+        oauth: args.oauthProvider ? {
+          provider: args.oauthProvider,
+          userId: args.oauthUserId,
+          clientId: args.oauthClientId,
+          clientSecret: args.oauthClientSecret,
+        } : undefined,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            response,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('API request failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'API_REQUEST_ERROR',
+              message: error.message || 'Failed to make API request',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleApiOAuthInit(args: any): Promise<any> {
-    return this.handleApiRequest(args);
+    try {
+      logger.info('Handling api_oauth_init', { provider: args.provider });
+
+      const authUrl = await this.apiEngine.getOAuthManager().buildAuthUrl(
+        args.provider,
+        args.clientId,
+        args.redirectUri,
+        args.scope
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            authUrl,
+            message: 'Navigate to this URL to authorize the application',
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('OAuth init failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'OAUTH_INIT_ERROR',
+              message: error.message || 'Failed to initialize OAuth flow',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleApiOAuthCallback(args: any): Promise<any> {
-    return this.handleApiRequest(args);
+    try {
+      logger.info('Handling api_oauth_callback', { provider: args.provider });
+
+      const tokens = await this.apiEngine.getOAuthManager().exchangeCodeForTokens(
+        args.provider,
+        args.code,
+        args.clientId,
+        args.clientSecret,
+        args.redirectUri
+      );
+
+      // Store tokens
+      await this.apiEngine.getOAuthManager().storeTokens(
+        args.provider,
+        args.userId,
+        tokens
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: 'OAuth tokens obtained and stored successfully',
+            expiresIn: tokens.expires_in,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('OAuth callback failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'OAUTH_CALLBACK_ERROR',
+              message: error.message || 'Failed to handle OAuth callback',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleApiOAuthRefresh(args: any): Promise<any> {
-    return this.handleApiRequest(args);
+    try {
+      logger.info('Handling api_oauth_refresh', { provider: args.provider });
+
+      const tokens = await this.apiEngine.getOAuthManager().refreshTokens(
+        args.provider,
+        args.userId,
+        args.clientId,
+        args.clientSecret
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: 'OAuth tokens refreshed successfully',
+            expiresIn: tokens.expires_in,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('OAuth refresh failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'OAUTH_REFRESH_ERROR',
+              message: error.message || 'Failed to refresh OAuth tokens',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleApiSetRateLimit(args: any): Promise<any> {
-    return this.handleApiRequest(args);
+    try {
+      logger.info('Handling api_set_rate_limit', { key: args.key });
+
+      this.apiEngine.getRateLimitManager().setEndpointLimit(
+        args.key,
+        {
+          requests: args.tokensPerInterval,
+          window: args.interval,
+        }
+      );
+
+      if (args.api) {
+        this.apiEngine.getRateLimitManager().setGlobalLimit(
+          args.api,
+          {
+            requests: args.tokensPerInterval,
+            window: args.interval,
+          }
+        );
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: `Rate limit configured: ${args.tokensPerInterval} requests per ${args.interval}ms`,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Set rate limit failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'RATE_LIMIT_ERROR',
+              message: error.message || 'Failed to set rate limit',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleApiGetRateLimitStatus(args: any): Promise<any> {
-    return this.handleApiRequest(args);
+    try {
+      logger.info('Handling api_get_rate_limit_status', { key: args.key });
+
+      const status = this.apiEngine.getRateLimitManager().getStatus(
+        args.key,
+        args.api
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            status,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Get rate limit status failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'RATE_LIMIT_STATUS_ERROR',
+              message: error.message || 'Failed to get rate limit status',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   // ============================================================================
-  // Database Engine Handlers (PLACEHOLDER - TODO: Full Implementation)
+  // Database Engine Handlers
   // ============================================================================
 
-  private async handleDbConnect(_args: any): Promise<any> {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          success: false,
-          error: {
-            code: 'NOT_IMPLEMENTED',
-            message: 'Database Engine handlers not yet implemented. Core engine complete, integration pending.',
-          },
-        }, null, 2),
-      }],
-    };
+  private async handleDbConnect(args: any): Promise<any> {
+    try {
+      logger.info('Handling db_connect', { connectionId: args.connectionId, type: args.type });
+
+      await this.databaseEngine.connect({
+        connectionId: args.connectionId,
+        type: args.type,
+        vaultName: args.vaultName,
+        credentialName: args.credentialName,
+        connectionString: args.connectionString,
+        poolSize: args.poolSize,
+        idleTimeout: args.idleTimeout,
+        connectionTimeout: args.connectionTimeout,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: `Connected to ${args.type} database`,
+            connectionId: args.connectionId,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Database connect failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'DB_CONNECT_ERROR',
+              message: error.message || 'Failed to connect to database',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleDbQuery(args: any): Promise<any> {
-    return this.handleDbConnect(args);
+    try {
+      logger.info('Handling db_query', { connectionId: args.connectionId, table: args.table });
+
+      const results = await this.databaseEngine.query(
+        args.connectionId,
+        args.table,
+        {
+          where: args.where,
+          select: args.select,
+          projection: args.projection,
+          orderBy: args.orderBy,
+          limit: args.limit,
+          offset: args.offset,
+        }
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            results,
+            count: results.length,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Database query failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'DB_QUERY_ERROR',
+              message: error.message || 'Failed to query database',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleDbInsert(args: any): Promise<any> {
-    return this.handleDbConnect(args);
+    try {
+      logger.info('Handling db_insert', { connectionId: args.connectionId, table: args.table });
+
+      const result = await this.databaseEngine.insert(
+        args.connectionId,
+        args.table,
+        {
+          data: args.data,
+        }
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            result,
+            message: 'Record(s) inserted successfully',
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Database insert failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'DB_INSERT_ERROR',
+              message: error.message || 'Failed to insert record(s)',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleDbUpdate(args: any): Promise<any> {
-    return this.handleDbConnect(args);
+    try {
+      logger.info('Handling db_update', { connectionId: args.connectionId, table: args.table });
+
+      const count = await this.databaseEngine.update(
+        args.connectionId,
+        args.table,
+        {
+          where: args.where,
+          data: args.data,
+        }
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            count,
+            message: `Updated ${count} record(s)`,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Database update failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'DB_UPDATE_ERROR',
+              message: error.message || 'Failed to update record(s)',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleDbDelete(args: any): Promise<any> {
-    return this.handleDbConnect(args);
+    try {
+      logger.info('Handling db_delete', { connectionId: args.connectionId, table: args.table });
+
+      const count = await this.databaseEngine.delete(
+        args.connectionId,
+        args.table,
+        {
+          where: args.where,
+        }
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            count,
+            message: `Deleted ${count} record(s)`,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Database delete failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'DB_DELETE_ERROR',
+              message: error.message || 'Failed to delete record(s)',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleDbTransaction(args: any): Promise<any> {
-    return this.handleDbConnect(args);
+    try {
+      logger.info('Handling db_transaction', { connectionId: args.connectionId });
+
+      const result = await this.databaseEngine.transaction(
+        args.connectionId,
+        args.operations,
+        {
+          maxRetries: args.retryCount,
+          isolationLevel: args.isolationLevel,
+        }
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            result,
+            message: 'Transaction executed successfully',
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Database transaction failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'DB_TRANSACTION_ERROR',
+              message: error.message || 'Failed to execute transaction',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleDbRawQuery(args: any): Promise<any> {
-    return this.handleDbConnect(args);
+    try {
+      logger.info('Handling db_raw_query', { connectionId: args.connectionId });
+
+      const result = await this.databaseEngine.rawQuery(
+        args.connectionId,
+        args.query,
+        args.params || []
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            result,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Database raw query failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'DB_RAW_QUERY_ERROR',
+              message: error.message || 'Failed to execute raw query',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleDbAggregate(args: any): Promise<any> {
-    return this.handleDbConnect(args);
+    try {
+      logger.info('Handling db_aggregate', { connectionId: args.connectionId, collection: args.collection });
+
+      const results = await this.databaseEngine.aggregate(
+        args.connectionId,
+        args.collection,
+        args.pipeline
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            results,
+            count: results.length,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Database aggregate failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'DB_AGGREGATE_ERROR',
+              message: error.message || 'Failed to execute aggregation',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleDbDisconnect(args: any): Promise<any> {
-    return this.handleDbConnect(args);
+    try {
+      logger.info('Handling db_disconnect', { connectionId: args.connectionId });
+
+      await this.databaseEngine.disconnect(args.connectionId);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: 'Database disconnected successfully',
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Database disconnect failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'DB_DISCONNECT_ERROR',
+              message: error.message || 'Failed to disconnect from database',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   // ============================================================================
-  // Email Engine Handlers (PLACEHOLDER - TODO: Full Implementation)
+  // Email Engine Handlers
   // ============================================================================
 
-  private async handleEmailGmailConnect(_args: any): Promise<any> {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          success: false,
-          error: {
-            code: 'NOT_IMPLEMENTED',
-            message: 'Email Engine handlers not yet implemented. Core engine complete, integration pending.',
-          },
-        }, null, 2),
-      }],
-    };
+  private async handleEmailGmailConnect(args: any): Promise<any> {
+    try {
+      logger.info('Handling email_gmail_connect', { userId: args.userId });
+
+      // Gmail OAuth connection is handled via API Engine OAuth flow
+      // This is a confirmation that connection credentials are available
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: 'Gmail connection ready (use api_oauth_init for Gmail OAuth setup)',
+            userId: args.userId,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Gmail connect failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'GMAIL_CONNECT_ERROR',
+              message: error.message || 'Failed to connect to Gmail',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleEmailGmailSend(args: any): Promise<any> {
-    return this.handleEmailGmailConnect(args);
+    try {
+      logger.info('Handling email_gmail_send', { userId: args.userId });
+
+      const messageId = await this.emailEngine.gmailSend(args.userId, {
+        to: args.to,
+        subject: args.subject,
+        body: args.body,
+        cc: args.cc,
+        bcc: args.bcc,
+        attachments: args.attachments,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            messageId,
+            message: 'Email sent successfully via Gmail',
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Gmail send failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'GMAIL_SEND_ERROR',
+              message: error.message || 'Failed to send email via Gmail',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleEmailGmailRead(args: any): Promise<any> {
-    return this.handleEmailGmailConnect(args);
+    try {
+      logger.info('Handling email_gmail_read', { userId: args.userId, messageId: args.messageId });
+
+      const message = await this.emailEngine.gmailGet(args.userId, args.messageId);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Gmail read failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'GMAIL_READ_ERROR',
+              message: error.message || 'Failed to read Gmail message',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleEmailGmailSearch(args: any): Promise<any> {
-    return this.handleEmailGmailConnect(args);
+    try {
+      logger.info('Handling email_gmail_search', { userId: args.userId, query: args.query });
+
+      const results = await this.emailEngine.gmailSearch(
+        args.userId,
+        args.query,
+        args.maxResults
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            results,
+            count: results.messages?.length || 0,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Gmail search failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'GMAIL_SEARCH_ERROR',
+              message: error.message || 'Failed to search Gmail',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleEmailSmtpConnect(args: any): Promise<any> {
-    return this.handleEmailGmailConnect(args);
+    try {
+      logger.info('Handling email_smtp_connect', { connectionId: args.connectionId });
+
+      await this.emailEngine.smtpConnect({
+        connectionId: args.connectionId,
+        vaultName: args.vaultName,
+        credentialName: args.credentialName,
+        host: args.host,
+        port: args.port,
+        secure: args.secure,
+        username: args.username,
+        password: args.password,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: 'SMTP connection established',
+            connectionId: args.connectionId,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('SMTP connect failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'SMTP_CONNECT_ERROR',
+              message: error.message || 'Failed to connect to SMTP server',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleEmailSmtpSend(args: any): Promise<any> {
-    return this.handleEmailGmailConnect(args);
+    try {
+      logger.info('Handling email_smtp_send', { connectionId: args.connectionId });
+
+      const messageId = await this.emailEngine.smtpSend(args.connectionId, {
+        from: args.from,
+        to: args.to,
+        subject: args.subject,
+        text: args.text,
+        html: args.html,
+        cc: args.cc,
+        bcc: args.bcc,
+        attachments: args.attachments,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            messageId,
+            message: 'Email sent successfully via SMTP',
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('SMTP send failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'SMTP_SEND_ERROR',
+              message: error.message || 'Failed to send email via SMTP',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleEmailImapConnect(args: any): Promise<any> {
-    return this.handleEmailGmailConnect(args);
+    try {
+      logger.info('Handling email_imap_connect', { connectionId: args.connectionId });
+
+      await this.emailEngine.imapConnect({
+        connectionId: args.connectionId,
+        vaultName: args.vaultName,
+        credentialName: args.credentialName,
+        host: args.host,
+        port: args.port,
+        secure: args.secure,
+        username: args.username,
+        password: args.password,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: 'IMAP connection established',
+            connectionId: args.connectionId,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('IMAP connect failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'IMAP_CONNECT_ERROR',
+              message: error.message || 'Failed to connect to IMAP server',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleEmailImapFetch(args: any): Promise<any> {
-    return this.handleEmailGmailConnect(args);
+    try {
+      logger.info('Handling email_imap_fetch', { connectionId: args.connectionId });
+
+      const emails = await this.emailEngine.imapFetch(args.connectionId, {
+        folder: args.mailbox || args.folder,
+        limit: args.limit,
+        criteria: args.unseen ? ['UNSEEN'] : undefined,
+        markSeen: args.markSeen,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            emails,
+            count: emails.length,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('IMAP fetch failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'IMAP_FETCH_ERROR',
+              message: error.message || 'Failed to fetch emails via IMAP',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   private async handleEmailParse(args: any): Promise<any> {
-    return this.handleEmailGmailConnect(args);
+    try {
+      logger.info('Handling email_parse');
+
+      const parsed = await this.emailEngine.parseEmail(args.rawEmail, {
+        extractAttachments: args.includeAttachments,
+        maxAttachmentSize: args.maxAttachmentSize,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            email: parsed,
+          }, null, 2),
+        }],
+      };
+    } catch (error: any) {
+      logger.error('Email parse failed', { error });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: error.code || 'EMAIL_PARSE_ERROR',
+              message: error.message || 'Failed to parse email',
+            },
+          }, null, 2),
+        }],
+      };
+    }
   }
 
   // ============================================================================

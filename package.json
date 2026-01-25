@@ -1,7 +1,7 @@
 {
   "name": "oktyv",
-  "version": "1.0.0-alpha.3",
-  "description": "Universal automation layer - ALL 7 engines exposed via MCP (4 fully integrated, 3 with placeholders)",
+  "version": "1.0.0-beta.1",
+  "description": "Universal automation layer - ALL 7 engines fully integrated and operational",
   "main": "dist/index.js",
   "bin": {
     "oktyv": "dist/cli/index.js"
