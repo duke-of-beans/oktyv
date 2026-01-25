@@ -1,7 +1,7 @@
 {
   "name": "oktyv",
-  "version": "0.3.0-alpha.1",
-  "description": "Universal automation layer with 7 core engines (Browser + Vault complete, API/DB/Email/File/Cron in progress)",
+  "version": "0.4.0-alpha.1",
+  "description": "Universal automation layer with 7 core engines (Browser + Vault + API complete, DB/Email/File/Cron in progress)",
   "main": "dist/index.js",
   "bin": {
     "oktyv": "dist/cli/index.js"
@@ -11,10 +11,10 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "test": "tsx --test tests/unit/connectors/*.test.ts tests/unit/tools/*.test.ts tests/unit/vault/*.test.ts",
-    "test:watch": "tsx --test --watch tests/unit/connectors/*.test.ts tests/unit/tools/*.test.ts tests/unit/vault/*.test.ts",
-    "test:coverage": "npx c8 --reporter=html --reporter=text tsx --test tests/unit/connectors/*.test.ts tests/unit/tools/*.test.ts tests/unit/vault/*.test.ts",
-    "test:coverage:text": "npx c8 --reporter=text tsx --test tests/unit/connectors/*.test.ts tests/unit/tools/*.test.ts tests/unit/vault/*.test.ts",
+    "test": "tsx --test tests/unit/connectors/*.test.ts tests/unit/tools/*.test.ts tests/unit/vault/*.test.ts tests/unit/api/*.test.ts",
+    "test:watch": "tsx --test --watch tests/unit/connectors/*.test.ts tests/unit/tools/*.test.ts tests/unit/vault/*.test.ts tests/unit/api/*.test.ts",
+    "test:coverage": "npx c8 --reporter=html --reporter=text tsx --test tests/unit/connectors/*.test.ts tests/unit/tools/*.test.ts tests/unit/vault/*.test.ts tests/unit/api/*.test.ts",
+    "test:coverage:text": "npx c8 --reporter=text tsx --test tests/unit/connectors/*.test.ts tests/unit/tools/*.test.ts tests/unit/vault/*.test.ts tests/unit/api/*.test.ts",
     "lint": "npx eslint src --ext .ts",
     "lint:fix": "npx eslint src --ext .ts --fix",
     "format": "npx prettier --write \"src/**/*.ts\"",
@@ -39,7 +39,9 @@
     "@modelcontextprotocol/sdk": "^1.0.4",
     "@napi-rs/keyring": "^1.2.0",
     "@types/cli-progress": "^3.11.6",
+    "axios": "^1.13.2",
     "chalk": "^5.3.0",
+    "cheerio": "^1.2.0",
     "cli-progress": "^3.12.0",
     "cli-table3": "^0.6.5",
     "commander": "^12.1.0",
@@ -49,10 +51,12 @@
     "p-retry": "^6.2.1",
     "puppeteer": "^23.10.4",
     "winston": "^3.17.0",
+    "xml2js": "^0.6.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.19.7",
+    "@types/xml2js": "^0.4.14",
     "@typescript-eslint/eslint-plugin": "^8.53.1",
     "@typescript-eslint/parser": "^8.53.1",
     "c8": "^10.1.3",
