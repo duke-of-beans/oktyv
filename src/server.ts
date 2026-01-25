@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Oktyv MCP Server
  * 
  * Main server class that implements the Model Context Protocol.
@@ -22,6 +22,7 @@ import type { JobSearchParams } from './types/job.js';
 import { OktyvErrorCode } from './types/mcp.js';
 import { VaultEngine } from './tools/vault/VaultEngine.js';
 import { FileEngine } from './tools/file/FileEngine.js';
+import { fileTools } from './tools/file/tools.js';
 import { CronEngine } from './tools/cron/CronEngine.js';
 import { cronTools } from './tools/cron/tools.js';
 
@@ -36,7 +37,7 @@ export class OktyvServer {
   private wellfoundConnector: WellfoundConnector;
   private genericConnector: GenericBrowserConnector;
   private vaultEngine: VaultEngine;
-  private fileEngine: FileEngine; // TODO: Integrate File Engine handlers
+  private fileEngine: FileEngine;
   private cronEngine: CronEngine;
 
   constructor() {
@@ -76,9 +77,6 @@ export class OktyvServer {
   }
 
   private setupHandlers(): void {
-    // TODO: Integrate File Engine handlers
-    void this.fileEngine;
-    
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       logger.debug('Received list_tools request');
@@ -516,6 +514,9 @@ export class OktyvServer {
             },
           },
 
+          // File Engine Tools
+          ...fileTools,
+
           // Cron Engine Tools
           ...cronTools,
         ],
@@ -596,6 +597,58 @@ export class OktyvServer {
 
           case 'vault_list_vaults':
             return await this.handleVaultListVaults(args);
+
+          // File Engine Tools
+          case 'file_read':
+            return await this.handleFileRead(args);
+
+          case 'file_write':
+            return await this.handleFileWrite(args);
+
+          case 'file_copy':
+            return await this.handleFileCopy(args);
+
+          case 'file_move':
+            return await this.handleFileMove(args);
+
+          case 'file_delete':
+            return await this.handleFileDelete(args);
+
+          case 'file_list':
+            return await this.handleFileList(args);
+
+          case 'file_stat':
+            return await this.handleFileStat(args);
+
+          case 'file_watch':
+            return await this.handleFileWatch(args);
+
+          case 'file_unwatch':
+            return await this.handleFileUnwatch(args);
+
+          case 'file_archive_create':
+            return await this.handleFileArchiveCreate(args);
+
+          case 'file_archive_extract':
+            return await this.handleFileArchiveExtract(args);
+
+          case 'file_archive_list':
+            return await this.handleFileArchiveList(args);
+
+          case 'file_hash':
+            return await this.handleFileHash(args);
+
+          case 'file_s3_upload':
+            return await this.handleFileS3Upload(args);
+
+          case 'file_s3_download':
+            return await this.handleFileS3Download(args);
+
+          case 'file_s3_list':
+            return await this.handleFileS3List(args);
+
+          case 'file_batch_operation':
+            return await this.handleFileBatchOperation(args);
 
           // Cron Engine Tools
           case 'cron_create_task':
@@ -2311,6 +2364,748 @@ export class OktyvServer {
               error: {
                 code: error.code || 'CRON_ERROR',
                 message: error.message || 'Failed to validate expression',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  // ============================================================================
+  // File Engine Handlers
+  // ============================================================================
+
+  private async handleFileRead(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_read', { path: args.path });
+
+      const content = await this.fileEngine.local.read(args.path, {
+        encoding: args.encoding as BufferEncoding || 'utf-8',
+        start: args.start,
+        end: args.end,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              content,
+              path: args.path,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File read failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to read file',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileWrite(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_write', { path: args.path });
+
+      await this.fileEngine.local.write(args.path, args.content, {
+        encoding: args.encoding as BufferEncoding || 'utf-8',
+        mode: args.mode || 'overwrite',
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              message: `File written successfully`,
+              path: args.path,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File write failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to write file',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileCopy(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_copy', { source: args.source, destination: args.destination });
+
+      await this.fileEngine.local.copy(args.source, args.destination, {
+        recursive: args.recursive || false,
+        overwrite: args.overwrite || false,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              message: `Copied successfully`,
+              source: args.source,
+              destination: args.destination,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File copy failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to copy file',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileMove(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_move', { source: args.source, destination: args.destination });
+
+      await this.fileEngine.local.move(args.source, args.destination, args.overwrite || false);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              message: `Moved successfully`,
+              source: args.source,
+              destination: args.destination,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File move failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to move file',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileDelete(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_delete', { path: args.path });
+
+      await this.fileEngine.local.delete(args.path, args.recursive || false);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              message: `Deleted successfully`,
+              path: args.path,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File delete failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to delete file',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileList(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_list', { path: args.path });
+
+      const files = await this.fileEngine.local.list(args.path, args.recursive || false, args.pattern);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              files,
+              count: files.length,
+              path: args.path,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File list failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to list files',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileStat(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_stat', { path: args.path });
+
+      const stats = await this.fileEngine.local.stat(args.path);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              stats,
+              path: args.path,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File stat failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to get file stats',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileWatch(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_watch', { path: args.path });
+
+      const watchId = `watch-${Date.now()}`;
+      const paths = Array.isArray(args.path) ? args.path : [args.path];
+      
+      this.fileEngine.watch.watch(
+        watchId,
+        paths,
+        (event: string, filePath: string) => {
+          logger.info('File watch event', { watchId, event, filePath });
+        },
+        {
+          events: args.events || ['add', 'change', 'unlink'],
+          recursive: args.recursive || false,
+          ignored: args.ignored,
+          debounce: args.debounce || 300,
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              watchId,
+              message: `Watching ${args.path}`,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File watch failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to watch file',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileUnwatch(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_unwatch', { watchId: args.watchId });
+
+      this.fileEngine.watch.unwatch(args.watchId);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              message: `Stopped watching`,
+              watchId: args.watchId,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File unwatch failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to unwatch file',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileArchiveCreate(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_archive_create', { destination: args.destination });
+
+      await this.fileEngine.archive.create({
+        sources: args.sources,
+        destination: args.destination,
+        format: args.format || 'zip',
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              message: `Archive created successfully`,
+              destination: args.destination,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File archive create failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to create archive',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileArchiveExtract(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_archive_extract', { archive: args.archive });
+
+      await this.fileEngine.archive.extract({
+        archive: args.archive,
+        destination: args.destination,
+        format: args.format,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              message: `Archive extracted successfully`,
+              destination: args.destination,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File archive extract failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to extract archive',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileArchiveList(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_archive_list', { archive: args.archive });
+
+      const entries = await this.fileEngine.archive.list(
+        args.archive,
+        args.format
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              entries,
+              count: entries.length,
+              archive: args.archive,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File archive list failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to list archive',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileHash(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_hash', { path: args.path });
+
+      const hash = await this.fileEngine.hash.hash(args.path, args.algorithm || 'sha256');
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              hash,
+              algorithm: args.algorithm || 'sha256',
+              path: args.path,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File hash failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to calculate hash',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileS3Upload(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_s3_upload', { filePath: args.filePath });
+
+      await this.fileEngine.cloud.uploadToS3({
+        filePath: args.filePath,
+        bucket: args.bucket,
+        key: args.key,
+        credentials: args.credentials,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              message: `Uploaded to S3 successfully`,
+              key: args.key,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File S3 upload failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to upload to S3',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileS3Download(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_s3_download', { key: args.key });
+
+      await this.fileEngine.cloud.downloadFromS3({
+        bucket: args.bucket,
+        key: args.key,
+        destination: args.destination,
+        credentials: args.credentials,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              message: `Downloaded from S3 successfully`,
+              localPath: args.localPath,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File S3 download failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to download from S3',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileS3List(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_s3_list', { bucket: args.bucket });
+
+      const objects = await this.fileEngine.cloud.listS3Objects({
+        bucket: args.bucket,
+        prefix: args.prefix,
+        credentials: args.credentials,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              objects,
+              count: objects.length,
+              bucket: args.bucket,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File S3 list failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to list S3 objects',
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleFileBatchOperation(args: any): Promise<any> {
+    try {
+      logger.info('Handling file_batch_operation', { operation: args.operation });
+
+      // Convert sources to batch items
+      const items = args.sources.map((source: string) => ({
+        source,
+        destination: args.destination,
+      }));
+
+      // Create executor based on operation
+      let executor: (item: any) => Promise<void>;
+      
+      if (args.operation === 'copy') {
+        executor = async (item) => {
+          await this.fileEngine.local.copy(item.source, item.destination, {
+            recursive: args.options?.recursive || false,
+            overwrite: args.options?.overwrite || false,
+          });
+        };
+      } else if (args.operation === 'move') {
+        executor = async (item) => {
+          await this.fileEngine.local.move(item.source, item.destination, args.options?.overwrite || false);
+        };
+      } else if (args.operation === 'delete') {
+        executor = async (item) => {
+          await this.fileEngine.local.delete(item.source, args.options?.recursive || false);
+        };
+      } else {
+        throw new Error(`Unknown batch operation: ${args.operation}`);
+      }
+
+      const results = await this.fileEngine.batch.execute(
+        {
+          operation: args.operation,
+          items,
+          concurrency: args.options?.concurrency || 5,
+          continueOnError: args.options?.continueOnError !== false,
+        },
+        executor
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              results,
+              operation: args.operation,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('File batch operation failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || 'FILE_ERROR',
+                message: error.message || 'Failed to execute batch operation',
               },
             }, null, 2),
           },
