@@ -1,0 +1,20 @@
+name: Simple Test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hello World
+        run: echo "GitHub Actions is working!"
+      
+      - name: Show Environment
+        run: |
+          echo "Node version:"
+          node --version
+          echo "Working directory:"
+          pwd
