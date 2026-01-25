@@ -1,7 +1,7 @@
 {
   "name": "oktyv",
-  "version": "1.0.0-alpha.1",
-  "description": "Universal automation layer with ALL 7 engines complete (Browser, Vault, API, Database, Email, File, Cron)",
+  "version": "1.0.0-alpha.2",
+  "description": "Universal automation layer with 4/7 engines integrated (Browser, Vault, File, Cron fully operational)",
   "main": "dist/index.js",
   "bin": {
     "oktyv": "dist/cli/index.js"

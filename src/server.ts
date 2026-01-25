@@ -44,7 +44,7 @@ export class OktyvServer {
     this.server = new Server(
       {
         name: 'oktyv',
-        version: '1.0.0-alpha.1',
+        version: '1.0.0-alpha.2',
       },
       {
         capabilities: {
