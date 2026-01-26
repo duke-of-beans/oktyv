@@ -7,7 +7,7 @@
  * - Error handling and retry logic
  */
 
-import { Task, TaskResult } from './types.js';
+import { TaskResult } from './types.js';
 
 /**
  * Custom error for variable resolution failures
@@ -116,7 +116,7 @@ function resolveString(
   }
   
   // Partial replacement - replace variables within string
-  return str.replace(variablePattern, (match, path) => {
+  return str.replace(variablePattern, (_match, path) => {
     const value = resolveVariablePath(path, previousResults);
     
     // Convert to string for embedding
@@ -233,7 +233,7 @@ export async function executeWithRetry<T>(
     backoff: 'exponential' | 'linear';
     initialDelay: number;
   },
-  taskId: string
+  _taskId: string
 ): Promise<T> {
   let lastError: Error | undefined;
   

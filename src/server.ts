@@ -31,6 +31,7 @@ import { emailTools } from './tools/email/tools.js';
 import { ApiEngine } from './tools/api/ApiEngine.js';
 import { DatabaseEngine } from './tools/database/DatabaseEngine.js';
 import { EmailEngine } from './tools/email/EmailEngine.js';
+import { ParallelExecutionEngine } from './engines/parallel/ParallelExecutionEngine.js';
 
 const logger = createLogger('server');
 
@@ -48,6 +49,7 @@ export class OktyvServer {
   private apiEngine: ApiEngine;
   private databaseEngine: DatabaseEngine;
   private emailEngine: EmailEngine;
+  private parallelEngine: ParallelExecutionEngine;
 
   constructor() {
     this.server = new Server(
@@ -106,8 +108,16 @@ export class OktyvServer {
       }
     );
 
+    // Initialize parallel execution infrastructure
+    // Tool registry will be populated after setupHandlers()
+    const toolRegistry = new Map<string, (params: Record<string, any>) => Promise<any>>();
+    this.parallelEngine = new ParallelExecutionEngine(toolRegistry);
+
     // Register handlers
     this.setupHandlers();
+    
+    // Populate tool registry with all available tools
+    this.populateToolRegistry(toolRegistry);
 
     logger.info('Oktyv Server initialized');
   }
@@ -564,6 +574,69 @@ export class OktyvServer {
 
           // Email Engine Tools
           ...emailTools,
+
+          // Parallel Execution Engine
+          {
+            name: 'parallel_execute',
+            description: 'Execute multiple Oktyv operations concurrently with dependency management. Supports DAG-based execution with automatic level detection, variable substitution between tasks, and configurable concurrency control.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                tasks: {
+                  type: 'array',
+                  description: 'Array of tasks to execute. Each task specifies a tool to run with parameters and optional dependencies.',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: {
+                        type: 'string',
+                        description: 'Unique identifier for this task (used for dependency references and variable substitution)',
+                      },
+                      tool: {
+                        type: 'string',
+                        description: 'Name of the Oktyv tool to execute (e.g., "file_move", "email_gmail_send")',
+                      },
+                      params: {
+                        type: 'object',
+                        description: 'Parameters to pass to the tool. Supports variable substitution from previous task results using ${taskId.result.field} syntax.',
+                      },
+                      dependsOn: {
+                        type: 'array',
+                        description: 'Optional array of task IDs that must complete successfully before this task runs',
+                        items: {
+                          type: 'string',
+                        },
+                      },
+                      timeout: {
+                        type: 'number',
+                        description: 'Optional timeout in milliseconds for this specific task',
+                      },
+                    },
+                    required: ['id', 'tool', 'params'],
+                  },
+                },
+                config: {
+                  type: 'object',
+                  description: 'Optional execution configuration',
+                  properties: {
+                    maxConcurrent: {
+                      type: 'number',
+                      description: 'Maximum number of tasks to run concurrently (default: 10)',
+                    },
+                    continueOnError: {
+                      type: 'boolean',
+                      description: 'Whether to continue executing remaining tasks after a failure (default: true)',
+                    },
+                    timeout: {
+                      type: 'number',
+                      description: 'Overall execution timeout in milliseconds',
+                    },
+                  },
+                },
+              },
+              required: ['tasks'],
+            },
+          },
         ],
       };
     });
@@ -806,6 +879,10 @@ export class OktyvServer {
 
           case 'email_parse':
             return await this.handleEmailParse(args);
+
+          // Parallel Execution Engine
+          case 'parallel_execute':
+            return await this.handleParallelExecute(args);
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -4211,6 +4288,191 @@ export class OktyvServer {
         ],
       };
     }
+  }
+
+  private async handleParallelExecute(args: any): Promise<any> {
+    try {
+      logger.info('Handling parallel_execute', {
+        taskCount: args.tasks?.length,
+        config: args.config
+      });
+
+      // Validate request
+      if (!args.tasks || !Array.isArray(args.tasks) || args.tasks.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: {
+                  code: OktyvErrorCode.INVALID_PARAMETERS,
+                  message: 'tasks array is required and must not be empty',
+                  retryable: false,
+                },
+              }, null, 2),
+            },
+          ],
+        };
+      }
+
+      // Execute parallel tasks
+      const result = await this.parallelEngine.execute({
+        tasks: args.tasks,
+        config: args.config,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              result,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      logger.error('Parallel execution failed', { error });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: {
+                code: error.code || OktyvErrorCode.UNKNOWN_ERROR,
+                message: error.message || 'Parallel execution failed',
+                retryable: error.retryable !== false,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  /**
+   * Populate tool registry for parallel execution
+   * Maps each tool name to an executor function
+   */
+  private populateToolRegistry(registry: Map<string, (params: Record<string, any>) => Promise<any>>): void {
+    // Helper to wrap handler methods for parallel execution
+    const wrapHandler = (handler: (args: any) => Promise<any>) => {
+      return async (params: Record<string, any>) => {
+        const result = await handler.call(this, params);
+        // Extract actual result from MCP response format
+        if (result.content && result.content[0] && result.content[0].text) {
+          const parsed = JSON.parse(result.content[0].text);
+          if (parsed.success) {
+            return parsed.result;
+          } else {
+            const error: any = new Error(parsed.error?.message || 'Tool execution failed');
+            error.code = parsed.error?.code;
+            throw error;
+          }
+        }
+        throw new Error('Invalid tool response format');
+      };
+    };
+
+    // Register all LinkedIn tools
+    registry.set('linkedin_search_jobs', wrapHandler(this.handleLinkedInSearchJobs));
+    registry.set('linkedin_get_job', wrapHandler(this.handleLinkedInGetJob));
+    registry.set('linkedin_get_company', wrapHandler(this.handleLinkedInGetCompany));
+
+    // Register all Indeed tools
+    registry.set('indeed_search_jobs', wrapHandler(this.handleIndeedSearchJobs));
+    registry.set('indeed_get_job', wrapHandler(this.handleIndeedGetJob));
+    registry.set('indeed_get_company', wrapHandler(this.handleIndeedGetCompany));
+
+    // Register all Wellfound tools
+    registry.set('wellfound_search_jobs', wrapHandler(this.handleWellfoundSearchJobs));
+    registry.set('wellfound_get_job', wrapHandler(this.handleWellfoundGetJob));
+    registry.set('wellfound_get_company', wrapHandler(this.handleWellfoundGetCompany));
+
+    // Register all Generic Browser tools
+    registry.set('browser_navigate', wrapHandler(this.handleBrowserNavigate));
+    registry.set('browser_click', wrapHandler(this.handleBrowserClick));
+    registry.set('browser_type', wrapHandler(this.handleBrowserType));
+    registry.set('browser_extract', wrapHandler(this.handleBrowserExtract));
+    registry.set('browser_screenshot', wrapHandler(this.handleBrowserScreenshot));
+    registry.set('browser_pdf', wrapHandler(this.handleBrowserPdf));
+    registry.set('browser_form_fill', wrapHandler(this.handleBrowserFormFill));
+
+    // Register all Vault tools
+    registry.set('vault_set', wrapHandler(this.handleVaultSet));
+    registry.set('vault_get', wrapHandler(this.handleVaultGet));
+    registry.set('vault_delete', wrapHandler(this.handleVaultDelete));
+    registry.set('vault_list', wrapHandler(this.handleVaultList));
+    registry.set('vault_list_vaults', wrapHandler(this.handleVaultListVaults));
+    registry.set('vault_delete_vault', wrapHandler(this.handleVaultDeleteVault));
+
+    // Register all File tools
+    registry.set('file_read', wrapHandler(this.handleFileRead));
+    registry.set('file_write', wrapHandler(this.handleFileWrite));
+    registry.set('file_copy', wrapHandler(this.handleFileCopy));
+    registry.set('file_move', wrapHandler(this.handleFileMove));
+    registry.set('file_delete', wrapHandler(this.handleFileDelete));
+    registry.set('file_list', wrapHandler(this.handleFileList));
+    registry.set('file_stat', wrapHandler(this.handleFileStat));
+    registry.set('file_hash', wrapHandler(this.handleFileHash));
+    registry.set('file_archive_create', wrapHandler(this.handleFileArchiveCreate));
+    registry.set('file_archive_extract', wrapHandler(this.handleFileArchiveExtract));
+    registry.set('file_archive_list', wrapHandler(this.handleFileArchiveList));
+    registry.set('file_watch', wrapHandler(this.handleFileWatch));
+    registry.set('file_unwatch', wrapHandler(this.handleFileUnwatch));
+    registry.set('file_batch_operation', wrapHandler(this.handleFileBatchOperation));
+
+    // Register all Cron tools
+    registry.set('cron_create_task', wrapHandler(this.handleCronCreateTask));
+    registry.set('cron_update_task', wrapHandler(this.handleCronUpdateTask));
+    registry.set('cron_delete_task', wrapHandler(this.handleCronDeleteTask));
+    registry.set('cron_list_tasks', wrapHandler(this.handleCronListTasks));
+    registry.set('cron_get_task', wrapHandler(this.handleCronGetTask));
+    registry.set('cron_enable_task', wrapHandler(this.handleCronEnableTask));
+    registry.set('cron_disable_task', wrapHandler(this.handleCronDisableTask));
+    registry.set('cron_execute_now', wrapHandler(this.handleCronExecuteNow));
+    registry.set('cron_get_history', wrapHandler(this.handleCronGetHistory));
+    registry.set('cron_get_statistics', wrapHandler(this.handleCronGetStatistics));
+    registry.set('cron_clear_history', wrapHandler(this.handleCronClearHistory));
+    registry.set('cron_validate_expression', wrapHandler(this.handleCronValidateExpression));
+
+    // Register all API tools  
+    registry.set('api_request', wrapHandler(this.handleApiRequest));
+    registry.set('api_oauth_init', wrapHandler(this.handleApiOAuthInit));
+    registry.set('api_oauth_callback', wrapHandler(this.handleApiOAuthCallback));
+    registry.set('api_oauth_refresh', wrapHandler(this.handleApiOAuthRefresh));
+    registry.set('api_set_rate_limit', wrapHandler(this.handleApiSetRateLimit));
+    registry.set('api_get_rate_limit_status', wrapHandler(this.handleApiGetRateLimitStatus));
+
+    // Register all Database tools
+    registry.set('db_connect', wrapHandler(this.handleDbConnect));
+    registry.set('db_query', wrapHandler(this.handleDbQuery));
+    registry.set('db_insert', wrapHandler(this.handleDbInsert));
+    registry.set('db_update', wrapHandler(this.handleDbUpdate));
+    registry.set('db_delete', wrapHandler(this.handleDbDelete));
+    registry.set('db_transaction', wrapHandler(this.handleDbTransaction));
+    registry.set('db_raw_query', wrapHandler(this.handleDbRawQuery));
+    registry.set('db_aggregate', wrapHandler(this.handleDbAggregate));
+    registry.set('db_disconnect', wrapHandler(this.handleDbDisconnect));
+
+    // Register all Email tools
+    registry.set('email_gmail_connect', wrapHandler(this.handleEmailGmailConnect));
+    registry.set('email_gmail_send', wrapHandler(this.handleEmailGmailSend));
+    registry.set('email_gmail_read', wrapHandler(this.handleEmailGmailRead));
+    registry.set('email_gmail_search', wrapHandler(this.handleEmailGmailSearch));
+    registry.set('email_smtp_connect', wrapHandler(this.handleEmailSmtpConnect));
+    registry.set('email_smtp_send', wrapHandler(this.handleEmailSmtpSend));
+    registry.set('email_imap_connect', wrapHandler(this.handleEmailImapConnect));
+    registry.set('email_imap_fetch', wrapHandler(this.handleEmailImapFetch));
+    registry.set('email_parse', wrapHandler(this.handleEmailParse));
+
+    logger.info('Tool registry populated for parallel execution', {
+      toolCount: registry.size
+    });
   }
 
   async connect(transport: StdioServerTransport): Promise<void> {

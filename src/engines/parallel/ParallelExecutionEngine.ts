@@ -6,6 +6,7 @@
  */
 
 import { EventEmitter } from 'events';
+// @ts-ignore - uuid types not needed for runtime
 import { v4 as uuidv4 } from 'uuid';
 import { createLogger } from '../../utils/logger.js';
 import { validateAndBuildDAG } from './DAGBuilder.js';
@@ -13,13 +14,11 @@ import {
   resolveParams,
   executeWithTimeout,
   executeWithRetry,
-  extractError,
-  VariableResolutionError,
-  TaskTimeoutError
+  extractError
 } from './TaskExecutor.js';
 import {
-  ExecutionRequest,
-  ExecutionResponse,
+  ParallelExecutionRequest,
+  ParallelExecutionResult,
   ExecutionConfig,
   Task,
   TaskResult,
@@ -53,7 +52,7 @@ export class ParallelExecutionEngine extends EventEmitter {
   /**
    * Execute a parallel execution request
    */
-  async execute(request: ExecutionRequest): Promise<ExecutionResponse> {
+  async execute(request: ParallelExecutionRequest): Promise<ParallelExecutionResult> {
     const executionId = uuidv4();
     const startTime = new Date().toISOString();
     const startTimestamp = Date.now();
@@ -61,7 +60,7 @@ export class ParallelExecutionEngine extends EventEmitter {
     logger.info(`Starting parallel execution`, {
       executionId,
       taskCount: request.tasks.length,
-      continueOnError: request.config?.continueOnError
+      failureMode: request.config?.failureMode || 'continue'
     });
 
     try {
@@ -100,8 +99,9 @@ export class ParallelExecutionEngine extends EventEmitter {
         // Merge results
         Object.assign(taskResults, levelResults);
 
-        // Check if we should continue (only if continueOnError is false)
-        if (!config.continueOnError) {
+        // Check if we should continue after failures
+        const failureMode = config.failureMode || 'continue';
+        if (failureMode === 'stop') {
           const failed = Object.values(levelResults).filter(r => r.status === 'failed');
           if (failed.length > 0) {
             logger.warn(`Level ${i} had failures, stopping execution`, {
@@ -237,8 +237,8 @@ export class ParallelExecutionEngine extends EventEmitter {
 
       // Execute with retry if configured
       let result: any;
-      if (task.retry) {
-        result = await executeWithRetry(executeFn, task.retry, task.id);
+      if (task.retryPolicy) {
+        result = await executeWithRetry(executeFn, task.retryPolicy, task.id);
       } else {
         // Execute with timeout only
         const timeout = task.timeout || config.timeout || 300000; // 5 min default
@@ -307,12 +307,12 @@ export class ParallelExecutionEngine extends EventEmitter {
   /**
    * Extract edges from graph for response
    */
-  private extractEdges(graph: Map<string, DAGNode>): Array<[string, string]> {
-    const edges: Array<[string, string]> = [];
+  private extractEdges(graph: Map<string, DAGNode>): Array<{ from: string; to: string }> {
+    const edges: Array<{ from: string; to: string }> = [];
 
     for (const [nodeId, node] of graph.entries()) {
       for (const depId of node.dependencies) {
-        edges.push([depId, nodeId]);
+        edges.push({ from: depId, to: nodeId });
       }
     }
 

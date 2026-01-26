@@ -2,9 +2,11 @@
  * DAG Builder Tests
  * 
  * Comprehensive test suite for graph construction, validation, and sorting
+ * Using Node.js built-in test runner
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
 import {
   buildDAG,
   detectCircularDependencies,
@@ -22,7 +24,7 @@ describe('DAGBuilder', () => {
       const tasks: Task[] = [];
       const graph = buildDAG(tasks);
       
-      expect(graph.size).toBe(0);
+      assert.strictEqual(graph.size, 0);
     });
 
     it('should handle single task with no dependencies', () => {
@@ -32,13 +34,13 @@ describe('DAGBuilder', () => {
       
       const graph = buildDAG(tasks);
       
-      expect(graph.size).toBe(1);
-      expect(graph.has('task1')).toBe(true);
+      assert.strictEqual(graph.size, 1);
+      assert.ok(graph.has('task1'));
       
       const node = graph.get('task1')!;
-      expect(node.task.id).toBe('task1');
-      expect(node.dependencies.size).toBe(0);
-      expect(node.dependents.size).toBe(0);
+      assert.strictEqual(node.task.id, 'task1');
+      assert.strictEqual(node.dependencies.size, 0);
+      assert.strictEqual(node.dependents.size, 0);
     });
 
     it('should handle multiple independent tasks', () => {
@@ -50,12 +52,12 @@ describe('DAGBuilder', () => {
       
       const graph = buildDAG(tasks);
       
-      expect(graph.size).toBe(3);
+      assert.strictEqual(graph.size, 3);
       
       for (const task of tasks) {
         const node = graph.get(task.id)!;
-        expect(node.dependencies.size).toBe(0);
-        expect(node.dependents.size).toBe(0);
+        assert.strictEqual(node.dependencies.size, 0);
+        assert.strictEqual(node.dependents.size, 0);
       }
     });
 
@@ -68,23 +70,23 @@ describe('DAGBuilder', () => {
       
       const graph = buildDAG(tasks);
       
-      expect(graph.size).toBe(3);
+      assert.strictEqual(graph.size, 3);
       
       const nodeA = graph.get('A')!;
-      expect(nodeA.dependencies.size).toBe(0);
-      expect(nodeA.dependents.has('B')).toBe(true);
-      expect(nodeA.dependents.size).toBe(1);
+      assert.strictEqual(nodeA.dependencies.size, 0);
+      assert.ok(nodeA.dependents.has('B'));
+      assert.strictEqual(nodeA.dependents.size, 1);
       
       const nodeB = graph.get('B')!;
-      expect(nodeB.dependencies.has('A')).toBe(true);
-      expect(nodeB.dependencies.size).toBe(1);
-      expect(nodeB.dependents.has('C')).toBe(true);
-      expect(nodeB.dependents.size).toBe(1);
+      assert.ok(nodeB.dependencies.has('A'));
+      assert.strictEqual(nodeB.dependencies.size, 1);
+      assert.ok(nodeB.dependents.has('C'));
+      assert.strictEqual(nodeB.dependents.size, 1);
       
       const nodeC = graph.get('C')!;
-      expect(nodeC.dependencies.has('B')).toBe(true);
-      expect(nodeC.dependencies.size).toBe(1);
-      expect(nodeC.dependents.size).toBe(0);
+      assert.ok(nodeC.dependencies.has('B'));
+      assert.strictEqual(nodeC.dependencies.size, 1);
+      assert.strictEqual(nodeC.dependents.size, 0);
     });
 
     it('should build diamond pattern (A → B,C → D)', () => {
@@ -97,27 +99,27 @@ describe('DAGBuilder', () => {
       
       const graph = buildDAG(tasks);
       
-      expect(graph.size).toBe(4);
+      assert.strictEqual(graph.size, 4);
       
       const nodeA = graph.get('A')!;
-      expect(nodeA.dependencies.size).toBe(0);
-      expect(nodeA.dependents.has('B')).toBe(true);
-      expect(nodeA.dependents.has('C')).toBe(true);
-      expect(nodeA.dependents.size).toBe(2);
+      assert.strictEqual(nodeA.dependencies.size, 0);
+      assert.ok(nodeA.dependents.has('B'));
+      assert.ok(nodeA.dependents.has('C'));
+      assert.strictEqual(nodeA.dependents.size, 2);
       
       const nodeB = graph.get('B')!;
-      expect(nodeB.dependencies.has('A')).toBe(true);
-      expect(nodeB.dependents.has('D')).toBe(true);
+      assert.ok(nodeB.dependencies.has('A'));
+      assert.ok(nodeB.dependents.has('D'));
       
       const nodeC = graph.get('C')!;
-      expect(nodeC.dependencies.has('A')).toBe(true);
-      expect(nodeC.dependents.has('D')).toBe(true);
+      assert.ok(nodeC.dependencies.has('A'));
+      assert.ok(nodeC.dependents.has('D'));
       
       const nodeD = graph.get('D')!;
-      expect(nodeD.dependencies.has('B')).toBe(true);
-      expect(nodeD.dependencies.has('C')).toBe(true);
-      expect(nodeD.dependencies.size).toBe(2);
-      expect(nodeD.dependents.size).toBe(0);
+      assert.ok(nodeD.dependencies.has('B'));
+      assert.ok(nodeD.dependencies.has('C'));
+      assert.strictEqual(nodeD.dependencies.size, 2);
+      assert.strictEqual(nodeD.dependents.size, 0);
     });
 
     it('should throw on missing dependency', () => {
@@ -125,8 +127,8 @@ describe('DAGBuilder', () => {
         { id: 'A', tool: 'tool', params: {}, dependsOn: ['NonExistent'] }
       ];
       
-      expect(() => buildDAG(tasks)).toThrow(MissingDependencyError);
-      expect(() => buildDAG(tasks)).toThrow('Task A depends on non-existent task NonExistent');
+      assert.throws(() => buildDAG(tasks), MissingDependencyError);
+      assert.throws(() => buildDAG(tasks), /Task A depends on non-existent task NonExistent/);
     });
 
     it('should throw on duplicate task IDs', () => {
@@ -135,7 +137,7 @@ describe('DAGBuilder', () => {
         { id: 'duplicate', tool: 'tool2', params: {} }
       ];
       
-      expect(() => buildDAG(tasks)).toThrow('Duplicate task ID: duplicate');
+      assert.throws(() => buildDAG(tasks), /Duplicate task ID: duplicate/);
     });
   });
 
@@ -150,7 +152,7 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const cycle = detectCircularDependencies(graph);
       
-      expect(cycle).toBeNull();
+      assert.strictEqual(cycle, null);
     });
 
     it('should detect simple cycle (A → B → A)', () => {
@@ -162,11 +164,11 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const cycle = detectCircularDependencies(graph);
       
-      expect(cycle).not.toBeNull();
-      expect(cycle).toContain('A');
-      expect(cycle).toContain('B');
+      assert.notStrictEqual(cycle, null);
+      assert.ok(cycle!.includes('A'));
+      assert.ok(cycle!.includes('B'));
       // Cycle should start and end with same node
-      expect(cycle![0]).toBe(cycle![cycle!.length - 1]);
+      assert.strictEqual(cycle![0], cycle![cycle!.length - 1]);
     });
 
     it('should detect longer cycle (A → B → C → A)', () => {
@@ -179,9 +181,9 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const cycle = detectCircularDependencies(graph);
       
-      expect(cycle).not.toBeNull();
-      expect(cycle!.length).toBe(4); // A → B → C → A
-      expect(cycle![0]).toBe(cycle![3]); // Starts and ends with same node
+      assert.notStrictEqual(cycle, null);
+      assert.strictEqual(cycle!.length, 4); // A → B → C → A
+      assert.strictEqual(cycle![0], cycle![3]); // Starts and ends with same node
     });
 
     it('should detect self-loop', () => {
@@ -192,8 +194,8 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const cycle = detectCircularDependencies(graph);
       
-      expect(cycle).not.toBeNull();
-      expect(cycle).toEqual(['A', 'A']);
+      assert.notStrictEqual(cycle, null);
+      assert.deepStrictEqual(cycle, ['A', 'A']);
     });
 
     it('should handle disconnected components', () => {
@@ -208,7 +210,7 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const cycle = detectCircularDependencies(graph);
       
-      expect(cycle).toBeNull();
+      assert.strictEqual(cycle, null);
     });
   });
 
@@ -217,7 +219,7 @@ describe('DAGBuilder', () => {
       const graph = buildDAG([]);
       const levels = topologicalSort(graph);
       
-      expect(levels).toEqual([]);
+      assert.deepStrictEqual(levels, []);
     });
 
     it('should handle single task', () => {
@@ -228,7 +230,7 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const levels = topologicalSort(graph);
       
-      expect(levels).toEqual([['A']]);
+      assert.deepStrictEqual(levels, [['A']]);
     });
 
     it('should handle independent tasks (all in level 0)', () => {
@@ -241,11 +243,11 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const levels = topologicalSort(graph);
       
-      expect(levels.length).toBe(1);
-      expect(levels[0]).toHaveLength(3);
-      expect(levels[0]).toContain('A');
-      expect(levels[0]).toContain('B');
-      expect(levels[0]).toContain('C');
+      assert.strictEqual(levels.length, 1);
+      assert.strictEqual(levels[0].length, 3);
+      assert.ok(levels[0].includes('A'));
+      assert.ok(levels[0].includes('B'));
+      assert.ok(levels[0].includes('C'));
     });
 
     it('should sort simple chain correctly', () => {
@@ -258,7 +260,7 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const levels = topologicalSort(graph);
       
-      expect(levels).toEqual([
+      assert.deepStrictEqual(levels, [
         ['A'],
         ['B'],
         ['C']
@@ -276,12 +278,12 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const levels = topologicalSort(graph);
       
-      expect(levels.length).toBe(3);
-      expect(levels[0]).toEqual(['A']);
-      expect(levels[1]).toHaveLength(2);
-      expect(levels[1]).toContain('B');
-      expect(levels[1]).toContain('C');
-      expect(levels[2]).toEqual(['D']);
+      assert.strictEqual(levels.length, 3);
+      assert.deepStrictEqual(levels[0], ['A']);
+      assert.strictEqual(levels[1].length, 2);
+      assert.ok(levels[1].includes('B'));
+      assert.ok(levels[1].includes('C'));
+      assert.deepStrictEqual(levels[2], ['D']);
     });
 
     it('should handle complex graph', () => {
@@ -296,14 +298,14 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const levels = topologicalSort(graph);
       
-      expect(levels.length).toBe(3);
-      expect(levels[0]).toHaveLength(2);
-      expect(levels[0]).toContain('A');
-      expect(levels[0]).toContain('B');
-      expect(levels[1]).toHaveLength(2);
-      expect(levels[1]).toContain('C');
-      expect(levels[1]).toContain('D');
-      expect(levels[2]).toEqual(['E']);
+      assert.strictEqual(levels.length, 3);
+      assert.strictEqual(levels[0].length, 2);
+      assert.ok(levels[0].includes('A'));
+      assert.ok(levels[0].includes('B'));
+      assert.strictEqual(levels[1].length, 2);
+      assert.ok(levels[1].includes('C'));
+      assert.ok(levels[1].includes('D'));
+      assert.deepStrictEqual(levels[2], ['E']);
     });
 
     it('should set level property on nodes', () => {
@@ -316,9 +318,9 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       topologicalSort(graph);
       
-      expect(graph.get('A')!.level).toBe(0);
-      expect(graph.get('B')!.level).toBe(1);
-      expect(graph.get('C')!.level).toBe(2);
+      assert.strictEqual(graph.get('A')!.level, 0);
+      assert.strictEqual(graph.get('B')!.level, 1);
+      assert.strictEqual(graph.get('C')!.level, 2);
     });
   });
 
@@ -333,8 +335,8 @@ describe('DAGBuilder', () => {
       
       const result = validateAndBuildDAG(tasks);
       
-      expect(result.graph.size).toBe(4);
-      expect(result.levels.length).toBe(3);
+      assert.strictEqual(result.graph.size, 4);
+      assert.strictEqual(result.levels.length, 3);
     });
 
     it('should throw CircularDependencyError on cycle', () => {
@@ -344,8 +346,8 @@ describe('DAGBuilder', () => {
         { id: 'C', tool: 'tool', params: {}, dependsOn: ['A'] }
       ];
       
-      expect(() => validateAndBuildDAG(tasks)).toThrow(CircularDependencyError);
-      expect(() => validateAndBuildDAG(tasks)).toThrow('Circular dependency detected');
+      assert.throws(() => validateAndBuildDAG(tasks), CircularDependencyError);
+      assert.throws(() => validateAndBuildDAG(tasks), /Circular dependency detected/);
     });
 
     it('should throw MissingDependencyError on invalid reference', () => {
@@ -353,7 +355,7 @@ describe('DAGBuilder', () => {
         { id: 'A', tool: 'tool', params: {}, dependsOn: ['NonExistent'] }
       ];
       
-      expect(() => validateAndBuildDAG(tasks)).toThrow(MissingDependencyError);
+      assert.throws(() => validateAndBuildDAG(tasks), MissingDependencyError);
     });
   });
 
@@ -367,7 +369,7 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const edges = extractEdges(graph);
       
-      expect(edges).toEqual([]);
+      assert.deepStrictEqual(edges, []);
     });
 
     it('should extract edges correctly', () => {
@@ -380,10 +382,15 @@ describe('DAGBuilder', () => {
       const graph = buildDAG(tasks);
       const edges = extractEdges(graph);
       
-      expect(edges).toHaveLength(3);
-      expect(edges).toContainEqual({ from: 'A', to: 'B' });
-      expect(edges).toContainEqual({ from: 'A', to: 'C' });
-      expect(edges).toContainEqual({ from: 'B', to: 'C' });
+      assert.strictEqual(edges.length, 3);
+      
+      // Check edges exist
+      const hasEdge = (from: string, to: string) => 
+        edges.some(e => e.from === from && e.to === to);
+      
+      assert.ok(hasEdge('A', 'B'));
+      assert.ok(hasEdge('A', 'C'));
+      assert.ok(hasEdge('B', 'C'));
     });
   });
 });
