@@ -14,6 +14,7 @@
  */
 
 import { join } from 'path';
+import { mkdir } from 'fs/promises';
 import { createLogger } from '../utils/logger.js';
 import type { BrowserSessionManager } from '../browser/session.js';
 import type { RateLimiter } from '../browser/rate-limiter.js';
@@ -513,6 +514,7 @@ export class VisualInspectionConnector {
 
       try {
         const targetOutputDir = join(batchOutputDir, target.label).replace(/\\/g, '/');
+        await mkdir(targetOutputDir, { recursive: true });
 
         const mode = target.captureMode;
         const needsScroll = mode === 'scroll' || mode === 'scroll+styles';
