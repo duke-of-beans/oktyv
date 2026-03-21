@@ -1,7 +1,7 @@
 # Oktyv Project DNA
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-01-22
-# Updated: 2026-03-20
+# Updated: 2026-03-21
 # Philosophy: Option B Perfection - Do It Right First Time
 
 identity:
@@ -20,9 +20,9 @@ identity:
     Lean Infrastructure - Use existing tools, build only what's unique.
 
 current_state:
-  version: "1.2.0"
-  status: "PRODUCTION READY - All 8 engines complete. Browser engine confirmed operational end-to-end."
-  build: "✅ Passing (258/258 tests, CI/CD operational, production hardening complete)"
+  version: "1.3.0"
+  status: "PRODUCTION READY - All 8 engines + Visual Inspection Layer. Browser engine confirmed operational end-to-end."
+  build: "✅ Passing (258/258 tests + 13/13 session-manager unit tests, CI/CD operational, production hardening complete)"
   health:
     build: "✅ TypeScript compilation clean"
     tests: "✅ 258 tests passing (100% pass rate)"
@@ -41,6 +41,26 @@ current_state:
         - "Rate limiting with token bucket algorithm"
         - "Error recovery and retry logic"
         - "Stealth mode (anti-bot detection)"
+      visual_inspection:
+        status: "✅ PRODUCTION (shipped 2026-03-21)"
+        tools:
+          - "browser_scroll_capture — full page scroll-and-capture, viewport increments"
+          - "browser_selector_capture — element bounding box capture by CSS selector"
+          - "browser_computed_styles — zero disk I/O computed CSS property inspection"
+          - "browser_batch_audit — parallel multi-URL audit, hardware-limited concurrency"
+          - "browser_session_cleanup — explicit temp session directory cleanup"
+        temp_path_config:
+          base: "D:/Dev/oktyv/screenshots/temp"
+          pattern: "{base}/{prefix}-{uuid}/"
+          cleanup_default: true
+          c_drive_writes: "NEVER"
+        design_principles:
+          - "Screenshots always temporary — auto-deleted after synthesis"
+          - "Never write to C:\\ under any circumstances"
+          - "cleanup: true is the DEFAULT on every capture tool"
+          - "Parallel within hardware limits (default maxConcurrent: 3)"
+          - "Computed styles = pure data, zero disk I/O"
+          - "Generalized — no project-specific logic in the engine"
       runtime_config:
         - "Chrome installed at D:/Cache/puppeteer/chrome/win64-131.0.6778.204/chrome-win64/chrome.exe"
         - "PUPPETEER_CACHE_DIR=D:/Cache/puppeteer (claude_desktop_config.json)"
@@ -398,7 +418,7 @@ scope_agreement:
 
 meta:
   created: "2026-01-22T08:11:44Z"
-  last_updated: "2026-03-20T00:00:00Z"
+  last_updated: "2026-03-21T00:00:00Z"
   author: "David Kirsch"
   workspace_id: "oktyv"
   workspace_group: "standalone"
@@ -415,3 +435,4 @@ meta:
     - "1.0.0: Production ready - load testing, security audit, performance optimization, monitoring, error recovery"
     - "1.1.0: Parallel Execution Engine - DAG-based concurrent task orchestration"
     - "1.2.0: Browser engine runtime fix - EPERM path fix + Puppeteer Chrome install + executablePath resolution. First confirmed live end-to-end browser automation from Claude Desktop."
+    - "1.3.0: Visual Inspection Layer — 5 new MCP tools (scroll_capture, selector_capture, computed_styles, batch_audit, session_cleanup). Temp-only screenshots on D:\\, auto-cleanup, parallel batch (maxConcurrent:3), computed styles zero disk I/O. Generalized for entire portfolio."

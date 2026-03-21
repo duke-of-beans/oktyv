@@ -23,6 +23,8 @@ import { VaultEngine } from './tools/vault/VaultEngine.js';
 import { FileEngine } from './tools/file/FileEngine.js';
 import { fileTools } from './tools/file/tools.js';
 import { ParallelExecutionEngine } from './engines/parallel/ParallelExecutionEngine.js';
+import { VisualInspectionConnector } from './connectors/visual-inspection.js';
+import { ensureScreenshotsBaseExists } from './browser/session-manager.js';
 
 const logger = createLogger('server');
 
@@ -33,6 +35,7 @@ export class OktyvServer {
   private linkedInConnector: LinkedInConnector;
   private wellfoundConnector: WellfoundConnector;
   private genericConnector: GenericBrowserConnector;
+  private visualConnector: VisualInspectionConnector;
   private vaultEngine: VaultEngine;
   private fileEngine: FileEngine;
   private parallelEngine: ParallelExecutionEngine;
@@ -41,7 +44,7 @@ export class OktyvServer {
     this.server = new Server(
       {
         name: 'oktyv',
-        version: '1.2.0',
+        version: '1.3.0',
       },
       {
         capabilities: {
@@ -56,6 +59,12 @@ export class OktyvServer {
     this.linkedInConnector = new LinkedInConnector(this.sessionManager, this.rateLimiter);
     this.wellfoundConnector = new WellfoundConnector(this.sessionManager, this.rateLimiter);
     this.genericConnector = new GenericBrowserConnector(this.sessionManager, this.rateLimiter);
+    this.visualConnector = new VisualInspectionConnector(this.sessionManager, this.rateLimiter);
+
+    // Ensure temp screenshots dir exists on startup (D:\ only, never C:\)
+    ensureScreenshotsBaseExists().catch(err =>
+      logger.warn('Could not create screenshots base dir', { err })
+    );
 
     // Initialize vault infrastructure
     this.vaultEngine = new VaultEngine();
@@ -352,6 +361,184 @@ export class OktyvServer {
               required: ['fields'],
             },
           },
+          // Visual Inspection Tools
+          {
+            name: 'browser_scroll_capture',
+            description: 'Scroll a fully-rendered page in viewport increments and capture each section as a PNG. Temp files are auto-deleted after returning results (cleanup=true by default). No C:\\ paths.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                url: {
+                  type: 'string',
+                  description: 'URL to navigate to before capturing (optional — reuses current page if omitted)',
+                },
+                outputDir: {
+                  type: 'string',
+                  description: 'Override default temp directory (optional)',
+                },
+                viewportWidth: {
+                  type: 'number',
+                  description: 'Viewport width in pixels (default: 1280)',
+                },
+                viewportHeight: {
+                  type: 'number',
+                  description: 'Viewport height per capture in pixels (default: 900)',
+                },
+                overlap: {
+                  type: 'number',
+                  description: 'Overlap between captures in px (default: 100)',
+                },
+                waitAfterScroll: {
+                  type: 'number',
+                  description: 'ms to wait after scroll before capture (default: 300)',
+                },
+                cleanup: {
+                  type: 'boolean',
+                  description: 'Delete temp files after returning result (default: true)',
+                },
+              },
+              required: [],
+            },
+          },
+          {
+            name: 'browser_selector_capture',
+            description: 'Capture specific DOM elements by CSS selector — element bounding box only. Temp files auto-deleted (cleanup=true default).',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                selectors: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'CSS selectors to capture (one screenshot per matched element)',
+                },
+                url: {
+                  type: 'string',
+                  description: 'URL to navigate to first (optional)',
+                },
+                outputDir: {
+                  type: 'string',
+                  description: 'Override default temp directory (optional)',
+                },
+                padding: {
+                  type: 'number',
+                  description: 'Extra px around element bounding box (default: 8)',
+                },
+                cleanup: {
+                  type: 'boolean',
+                  description: 'Delete temp files after returning result (default: true)',
+                },
+              },
+              required: ['selectors'],
+            },
+          },
+          {
+            name: 'browser_computed_styles',
+            description: 'Extract computed CSS properties for matching elements. ZERO disk I/O — pure data. Use to verify fonts loaded, colors correct, layout dimensions. Most powerful QA tool.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                selectors: {
+                  type: 'object',
+                  description: 'Map of human labels to selector configs. e.g. {"hero-font": {"selector": "h1", "properties": ["font-family", "font-size"]}}',
+                  additionalProperties: {
+                    type: 'object',
+                    properties: {
+                      selector: { type: 'string', description: 'CSS selector' },
+                      properties: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'CSS property names to inspect (e.g. ["font-family", "color"])',
+                      },
+                      multiple: {
+                        type: 'boolean',
+                        description: 'Inspect all matching elements (default: first only)',
+                      },
+                    },
+                    required: ['selector', 'properties'],
+                  },
+                },
+                url: {
+                  type: 'string',
+                  description: 'URL to navigate to first (optional)',
+                },
+              },
+              required: ['selectors'],
+            },
+          },
+          {
+            name: 'browser_batch_audit',
+            description: 'Parallel visual audit across multiple URLs. Hardware-limited concurrency (default maxConcurrent: 3). Supports scroll, selector, and computed-styles modes per target.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                targets: {
+                  type: 'array',
+                  description: 'Array of audit targets',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      url: { type: 'string', description: 'URL to audit' },
+                      label: { type: 'string', description: 'Human label for this target' },
+                      captureMode: {
+                        type: 'string',
+                        enum: ['scroll', 'selector', 'styles', 'scroll+styles', 'selector+styles'],
+                        description: 'What to capture for this target',
+                      },
+                      selectors: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'CSS selectors (for selector/selector+styles mode)',
+                      },
+                      styleSelectors: {
+                        type: 'object',
+                        description: 'Style selectors map (for styles/scroll+styles/selector+styles mode)',
+                        additionalProperties: {
+                          type: 'object',
+                          properties: {
+                            selector: { type: 'string' },
+                            properties: { type: 'array', items: { type: 'string' } },
+                          },
+                          required: ['selector', 'properties'],
+                        },
+                      },
+                      scrollOptions: {
+                        type: 'object',
+                        description: 'Optional scroll capture overrides',
+                      },
+                    },
+                    required: ['url', 'label', 'captureMode'],
+                  },
+                },
+                maxConcurrent: {
+                  type: 'number',
+                  description: 'Max concurrent browser pages (default: 3)',
+                },
+                outputDir: {
+                  type: 'string',
+                  description: 'Shared base output dir for this batch (optional)',
+                },
+                cleanup: {
+                  type: 'boolean',
+                  description: 'Delete all temp files after batch completes (default: true)',
+                },
+              },
+              required: ['targets'],
+            },
+          },
+          {
+            name: 'browser_session_cleanup',
+            description: 'Explicitly delete a temp screenshot session directory (for when cleanup=false was used). Returns number of files deleted.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                sessionDir: {
+                  type: 'string',
+                  description: 'Full path to the session directory to delete (must be under D:/Dev/oktyv/screenshots/temp/)',
+                },
+              },
+              required: ['sessionDir'],
+            },
+          },
           // Vault Engine Tools
           {
             name: 'vault_set',
@@ -581,6 +768,22 @@ export class OktyvServer {
 
           case 'browser_form_fill':
             return await this.handleBrowserFormFill(args);
+
+          // Visual Inspection Tools
+          case 'browser_scroll_capture':
+            return await this.handleBrowserScrollCapture(args);
+
+          case 'browser_selector_capture':
+            return await this.handleBrowserSelectorCapture(args);
+
+          case 'browser_computed_styles':
+            return await this.handleBrowserComputedStyles(args);
+
+          case 'browser_batch_audit':
+            return await this.handleBrowserBatchAudit(args);
+
+          case 'browser_session_cleanup':
+            return await this.handleBrowserSessionCleanup(args);
 
           // Vault Engine Tools
           case 'vault_set':
@@ -1384,6 +1587,125 @@ export class OktyvServer {
     }
   }
 
+  // Visual Inspection Handlers
+
+  private async handleBrowserScrollCapture(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_scroll_capture', { args });
+      const result = await this.visualConnector.scrollCapture(args);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }],
+      };
+    } catch (error: any) {
+      logger.error('browser_scroll_capture failed', { error });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'scroll_capture failed', retryable: false },
+          }, null, 2),
+        }],
+      };
+    }
+  }
+
+  private async handleBrowserSelectorCapture(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_selector_capture', { args });
+      if (!args.selectors || !Array.isArray(args.selectors)) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.INVALID_PARAMETERS, message: 'selectors array is required', retryable: false } }, null, 2) }] };
+      }
+      const result = await this.visualConnector.selectorCapture(args);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }],
+      };
+    } catch (error: any) {
+      logger.error('browser_selector_capture failed', { error });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'selector_capture failed', retryable: false },
+          }, null, 2),
+        }],
+      };
+    }
+  }
+
+  private async handleBrowserComputedStyles(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_computed_styles', { args });
+      if (!args.selectors || typeof args.selectors !== 'object') {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.INVALID_PARAMETERS, message: 'selectors object is required', retryable: false } }, null, 2) }] };
+      }
+      const result = await this.visualConnector.computedStyles(args);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }],
+      };
+    } catch (error: any) {
+      logger.error('browser_computed_styles failed', { error });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'computed_styles failed', retryable: false },
+          }, null, 2),
+        }],
+      };
+    }
+  }
+
+  private async handleBrowserBatchAudit(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_batch_audit', { targetCount: args.targets?.length });
+      if (!args.targets || !Array.isArray(args.targets) || args.targets.length === 0) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.INVALID_PARAMETERS, message: 'targets array is required and must not be empty', retryable: false } }, null, 2) }] };
+      }
+      const result = await this.visualConnector.batchAudit(args);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }],
+      };
+    } catch (error: any) {
+      logger.error('browser_batch_audit failed', { error });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'batch_audit failed', retryable: false },
+          }, null, 2),
+        }],
+      };
+    }
+  }
+
+  private async handleBrowserSessionCleanup(args: any): Promise<any> {
+    try {
+      logger.info('Handling browser_session_cleanup', { sessionDir: args.sessionDir });
+      if (!args.sessionDir) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.INVALID_PARAMETERS, message: 'sessionDir is required', retryable: false } }, null, 2) }] };
+      }
+      const result = await this.visualConnector.sessionCleanup(args.sessionDir);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }],
+      };
+    } catch (error: any) {
+      logger.error('browser_session_cleanup failed', { error });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'session_cleanup failed', retryable: false },
+          }, null, 2),
+        }],
+      };
+    }
+  }
+
   // Vault Engine Handlers
 
   private async handleVaultSet(args: any): Promise<any> {
@@ -1967,6 +2289,11 @@ export class OktyvServer {
     registry.set('browser_screenshot', wrapHandler(this.handleBrowserScreenshot));
     registry.set('browser_pdf', wrapHandler(this.handleBrowserPdf));
     registry.set('browser_form_fill', wrapHandler(this.handleBrowserFormFill));
+    registry.set('browser_scroll_capture', wrapHandler(this.handleBrowserScrollCapture));
+    registry.set('browser_selector_capture', wrapHandler(this.handleBrowserSelectorCapture));
+    registry.set('browser_computed_styles', wrapHandler(this.handleBrowserComputedStyles));
+    registry.set('browser_batch_audit', wrapHandler(this.handleBrowserBatchAudit));
+    registry.set('browser_session_cleanup', wrapHandler(this.handleBrowserSessionCleanup));
 
     // Register all Vault tools
     registry.set('vault_set', wrapHandler(this.handleVaultSet));

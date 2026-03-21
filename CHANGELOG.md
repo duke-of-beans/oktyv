@@ -5,6 +5,56 @@ All notable changes to Oktyv will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-03-21
+
+### ✨ Added — Visual Inspection Layer
+
+Five new MCP tools enabling automated visual QA across every project in the portfolio.
+Generalized design: zero project-specific logic in the engine. Works identically for
+GAD fleet, COVOS dashboard, GregLite, DTS, Easter Agency, and any web surface.
+
+#### `browser_scroll_capture`
+Scrolls a fully-rendered page in viewport increments and captures each section as PNG.
+Temp files written to `D:/Dev/oktyv/screenshots/temp/{prefix}-{uuid}/` and auto-deleted
+after synthesis when `cleanup: true` (default). Never writes to C:\.
+
+#### `browser_selector_capture`
+Captures specific DOM elements by CSS selector (element bounding box only, not full
+viewport). Padding configurable, one screenshot per matched element, auto-cleanup default.
+
+#### `browser_computed_styles`
+Extracts computed CSS properties for matching elements. **Zero disk I/O — pure data.**
+Use to verify fonts actually loaded, colors correct, layout dimensions as expected.
+Most powerful tool for systematic QA: catches font-load failures, color token errors,
+layout regressions without touching the filesystem.
+
+#### `browser_batch_audit`
+Parallel visual audit across multiple URLs. Hardware-limited semaphore concurrency
+(default `maxConcurrent: 3`). Each target gets its own Puppeteer page — no new browser
+instances. `Promise.allSettled` for graceful failure handling. Supports `scroll`,
+`selector`, `styles`, `scroll+styles`, and `selector+styles` capture modes per target.
+
+#### `browser_session_cleanup`
+Explicit cleanup of a temp session directory for when `cleanup: false` was used.
+Returns count of files deleted. Safety check refuses paths outside `SCREENSHOTS_BASE`.
+
+### ✨ Added — Temp Session Manager
+New `src/browser/session-manager.ts` module:
+- `SCREENSHOTS_BASE = 'D:/Dev/oktyv/screenshots/temp'` — single source of truth
+- `createTempSession(prefix?)` — UUID session dir, returns full path
+- `cleanupSession(sessionDir)` — recursive delete with safety guard (refuses paths outside SCREENSHOTS_BASE)
+- `ensureScreenshotsBaseExists()` — called at server startup
+- 13/13 unit tests passing
+
+### Design Principles Enforced
+- Screenshots **always temporary** — never committed, never on C:\
+- `cleanup: true` is the DEFAULT on every capture tool
+- Parallel within hardware limits (default `maxConcurrent: 3`)
+- Computed styles = pure data, zero disk I/O
+- Generalized engine — project-specific config stays outside
+
+---
+
 ## [1.2.0] - 2026-03-20
 
 ### 🐛 Fixed — Browser Engine Runtime (First Confirmed Live Operation)
