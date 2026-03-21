@@ -5,6 +5,50 @@ All notable changes to Oktyv will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-20
+
+### 🐛 Fixed — Browser Engine Runtime (First Confirmed Live Operation)
+
+The browser engine was code-complete since v1.0.0 but had never successfully executed
+a real navigation from Claude Desktop due to two environment bugs caught only in live use.
+
+#### Bug 1 — EPERM: Browser session path resolved to system32
+- `BrowserSessionManager` constructor defaulted to `'./browser-data'`
+- When Claude Desktop spawns Oktyv as a subprocess, the working directory is
+  `C:\Windows\system32`, so the path resolved to `C:\Windows\system32\browser-data`
+- Fix: Changed default to `process.env.OKTYV_BROWSER_DATA_DIR || 'D:/Dev/oktyv/browser-data'`
+- Added `OKTYV_BROWSER_DATA_DIR=D:/Dev/oktyv/browser-data` to `claude_desktop_config.json`
+- Created `D:\Dev\oktyv\browser-data\` directory
+
+#### Bug 2 — Puppeteer Chrome not installed
+- Puppeteer requires a separate one-time Chrome download (`npx puppeteer browsers install chrome`)
+- Chrome had never been installed — every `browser_navigate` failed with
+  `Could not find Chrome (ver. 131.0.6778.204)`
+- Fix: Ran `node node_modules/puppeteer/install.mjs` from `D:\Dev\oktyv\`
+- Chrome installed to `D:\Cache\puppeteer\chrome\win64-131.0.6778.204\chrome-win64\chrome.exe`
+- Added `PUPPETEER_CACHE_DIR=D:/Cache/puppeteer` to `claude_desktop_config.json`
+- Added `executablePath` resolution in `session.ts` using `PUPPETEER_CACHE_DIR` env var
+
+#### Confirmed working (2026-03-20)
+- `browser_navigate` → navigation to live URLs ✅
+- `browser_screenshot` → viewport PNG capture ✅
+- `browser_extract` → CSS selector data extraction ✅
+- First use: GAD fleet structural audit (VW + European satellite sites)
+
+### Added
+- `_screenshot.cjs` helper script for converting Oktyv screenshot byte arrays to PNG
+- `browser-data/` session persistence directory
+
+### Changed
+- `src/browser/session.ts`: `BrowserSessionManager` constructor now uses `OKTYV_BROWSER_DATA_DIR`
+  env var with `D:/Dev/oktyv/browser-data` hardcoded fallback
+- `src/browser/session.ts`: `puppeteer.launch()` now resolves `executablePath` from
+  `PUPPETEER_CACHE_DIR` env var pointing at installed Chrome
+- `claude_desktop_config.json`: Added `OKTYV_BROWSER_DATA_DIR` and `PUPPETEER_CACHE_DIR`
+  env vars to Oktyv-MCP server config
+
+---
+
 ## [1.0.0-alpha.1] - 2026-01-25
 
 ### 🎉 MILESTONE: All 7 Core Engines Complete

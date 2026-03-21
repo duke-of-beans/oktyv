@@ -40,7 +40,7 @@ export class BrowserSessionManager {
   private sessions: Map<Platform, BrowserSession>;
   private baseUserDataDir: string;
 
-  constructor(baseUserDataDir: string = './browser-data') {
+  constructor(baseUserDataDir: string = process.env.OKTYV_BROWSER_DATA_DIR || 'D:/Dev/oktyv/browser-data') {
     this.sessions = new Map();
     this.baseUserDataDir = baseUserDataDir;
     logger.info('BrowserSessionManager initialized', { baseUserDataDir });
@@ -91,10 +91,17 @@ export class BrowserSessionManager {
 
       logger.debug('Launching browser', { platform, config: finalConfig });
 
+      // Resolve Chrome executable path from env or default Puppeteer cache
+      const cacheDir = process.env.PUPPETEER_CACHE_DIR || process.env.npm_config_cache || '';
+      const executablePath = cacheDir
+        ? `${cacheDir}/chrome/win64-131.0.6778.204/chrome-win64/chrome.exe`
+        : undefined;
+
       // Launch browser
       const browser = await puppeteer.launch({
         headless: finalConfig.headless,
         userDataDir,
+        ...(executablePath ? { executablePath } : {}),
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
