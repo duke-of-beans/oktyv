@@ -39,3 +39,8 @@ logs/
 # Temporary
 tmp/
 temp/
+
+# Visual inspection temp screenshots — always auto-cleaned, never committed
+screenshots/
+browser-data/
+_audit-report.json

@@ -1,19 +1,147 @@
 # Oktyv Implementation Roadmap
-**7-Engine Universal Automation Layer**
+**Universal Automation + Visual Inspection Layer**
 
-Version: 1.1.0  
+Version: 1.2.0  
 Created: 2026-01-24  
-Updated: 2026-01-24
+Updated: 2026-03-20
 
 ---
 
 ## Overview
 
-Oktyv is the complete universal automation infrastructure with 7 core engines. This roadmap details the implementation plan for each engine.
+Oktyv is the complete universal automation infrastructure with 8 engines plus a dedicated
+visual inspection system. All 8 engines are production-complete. The next phase (v1.3.0)
+delivers a generalized visual inspection layer usable across every project in the portfolio.
 
-**Current Status:** Browser Engine ✅ COMPLETE | 6 Engines 🔲 REMAINING  
-**Latest Version:** v0.2.0-alpha.2  
-**Goal:** All 7 engines (universal automation layer)
+**Current Status:** All 8 engines ✅ PRODUCTION | Browser runtime ✅ CONFIRMED LIVE  
+**Latest Version:** v1.2.0  
+**Goal:** v1.3.0 — Visual Inspection Layer
+
+---
+
+## Phase 10: Visual Inspection Layer (v1.3.0) 🔲 NEXT
+
+**Priority:** HIGH — unblocks automated visual QA across entire portfolio
+**Scope:** Generalized. Works identically for GAD fleet, COVOS dashboard, GregLite, DTS, Easter Agency, Thalamic lander, any web surface.
+
+### Design Principles
+- Screenshots are **always temporary** — written to `D:/Dev/oktyv/screenshots/temp/{session-id}/`, auto-deleted after synthesis
+- Never write to C:\ — all temp paths on D:\
+- **Two capture modes:** comprehensive (scroll-and-capture full page) AND targeted (CSS selector)
+- **Parallel within hardware limits** — batch audits run concurrent navigations
+- **Computed styles** — inspect what the browser actually rendered, not what's in source HTML
+- **Synthesis first** — capture → analyze → report → clean up. Images are means, not ends.
+
+### New MCP Tools
+
+#### `browser_scroll_capture`
+Scrolls a fully-rendered page in viewport increments and captures each section.
+```
+params:
+  url?: string              — navigate first if provided
+  outputDir?: string        — temp dir (default: D:/Dev/oktyv/screenshots/temp/{uuid}/)
+  viewportHeight?: number   — pixels per capture (default: 900)
+  overlap?: number          — overlap between captures in px (default: 100)
+  cleanup?: boolean         — delete files after returning paths (default: true)
+returns:
+  sessionId: string
+  captures: [{index, path, scrollY}]
+  totalHeight: number
+  pageUrl: string
+```
+
+#### `browser_selector_capture`  
+Captures specific DOM elements by CSS selector — element bounding box only, not full viewport.
+```
+params:
+  selectors: string[]       — CSS selectors to capture
+  url?: string              — navigate first if provided
+  outputDir?: string        — temp dir
+  cleanup?: boolean         — default true
+returns:
+  captures: [{selector, path, boundingBox, found: bool}]
+```
+
+#### `browser_computed_styles`
+Extracts computed CSS properties for matching elements. Zero screenshots, pure data.
+```
+params:
+  selectors: Record<string, string[]>  — {"label": ["selector", ["font-family", "color", ...]]}
+returns:
+  results: Record<string, {selector, properties: Record<string, string>, elementCount}>
+```
+Key use: verify fonts actually loaded, colors are correct, layout dimensions are as expected.
+Works without screenshots — pure DOM inspection.
+
+#### `browser_batch_audit`
+Parallel visual audit across multiple URLs. Hardware-limited concurrency.
+```
+params:
+  targets: [{url, label, selectors?, captureMode: 'scroll'|'selector'|'both'}]
+  maxConcurrent?: number    — default 3 (hardware safe)
+  outputDir?: string
+  cleanup?: boolean         — default true
+returns:
+  results: [{url, label, captures, computedStyles, errors}]
+  summary: {total, succeeded, failed, duration}
+```
+
+#### `browser_session_cleanup`
+Explicit cleanup of a temp session directory.
+```
+params:
+  sessionId: string         — from scroll_capture or batch_audit
+  or outputDir: string      — direct path
+returns:
+  deleted: number           — files removed
+  path: string
+```
+
+### Implementation Tracks
+
+**Track A — Temp session management**
+- `D:/Dev/oktyv/screenshots/temp/` as root (gitignored)
+- UUID session IDs per capture run
+- Auto-cleanup default true on all capture tools
+- `browser_session_cleanup` for explicit manual cleanup
+- Never write to C:\
+
+**Track B — scroll-and-capture**
+- Puppeteer `page.evaluate` to get full page height
+- Scroll in `(viewportHeight - overlap)` increments
+- `page.screenshot({path, clip: {x:0, y:scrollY, width, height}})` per section
+- Return paths array + cleanup
+
+**Track C — selector capture**
+- `page.$(selector)` → `element.boundingBox()` → `page.screenshot({clip: boundingBox})`
+- Multiple selectors in one call, one screenshot per element
+- Return {selector, path, found} per item
+
+**Track D — computed styles**
+- `page.evaluate` → `window.getComputedStyle(element)` for each property
+- Returns actual rendered values — catches font-load failures, color token errors
+- Zero disk I/O — pure data return
+
+**Track E — batch audit**
+- `Promise.allSettled` with semaphore for concurrency control
+- Each target gets its own Puppeteer page (not new browser instance)
+- Results aggregated into unified report
+- Cleanup after all targets complete
+
+**Track F — docs, version bump, commit**
+- STATUS.md, PROJECT_DNA.yaml, CHANGELOG.md updated
+- version → 1.3.0
+- npm run build, git commit, git push
+
+### Success Criteria
+- `browser_scroll_capture` captures full GAD homepage in sections, temp files cleaned up
+- `browser_selector_capture` captures each `<section>` element on a page individually  
+- `browser_computed_styles` correctly identifies Inter Tight vs wrong font on any page
+- `browser_batch_audit` audits all 7 GAD satellites in parallel, returns unified results
+- Zero temp files left on disk after any capture run with cleanup=true
+- All paths on D:\ — never C:\
+
+---
 
 ---
 

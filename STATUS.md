@@ -50,10 +50,14 @@ working live. First real end-to-end browser automation from Claude Desktop.
 - [ ] Integration with Easter Agency content operations (Wave 2 — automate posting/monitoring)
 - [ ] Integration with Lead-Gen-System (Oktyv orchestrates scraping + enrichment pipeline)
 - [ ] Integration with SCRVNR (Oktyv handles file output + delivery)
-- [ ] v1.3.0 planning: scroll-and-capture (full-page visual audit), workflow templates
+- [ ] v1.3.0: Visual Inspection Layer — browser_scroll_capture, browser_selector_capture,
+       browser_computed_styles, browser_batch_audit, browser_session_cleanup.
+       Temp screenshots on D:\ only, auto-cleanup, parallel hardware-limited batch.
+       Generalized: works for GAD fleet, COVOS dashboard, GregLite, DTS, Easter Agency.
+       See ROADMAP.md Phase 10 for full spec.
 - [ ] Wire into COVOS Intelligence Engine for automated scan dispatch
 - [ ] Wire into ContentStudio for GAD fleet visual audit automation
-- [ ] Claude in Chrome navigate tool fix (times out — workaround: pre-load tabs manually)
+- [ ] Claude in Chrome navigate tool: consistently times out cross-domain — workaround: pre-load tabs manually
 
 ## WHAT IS OPERATIONAL
 
