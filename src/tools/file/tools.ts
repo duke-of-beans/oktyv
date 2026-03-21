@@ -462,21 +462,10 @@ export const fileBatchOperationTool: Tool = {
 // ============================================================================
 
 export const fileTools: Tool[] = [
-  fileReadTool,
-  fileWriteTool,
   fileCopyTool,
-  fileMoveTool,
   fileDeleteTool,
-  fileListTool,
-  fileStatTool,
-  fileWatchTool,
-  fileUnwatchTool,
   fileArchiveCreateTool,
   fileArchiveExtractTool,
   fileArchiveListTool,
   fileHashTool,
-  fileS3UploadTool,
-  fileS3DownloadTool,
-  fileS3ListTool,
-  fileBatchOperationTool,
 ];
