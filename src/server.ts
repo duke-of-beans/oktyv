@@ -539,6 +539,20 @@ export class OktyvServer {
               required: ['sessionDir'],
             },
           },
+          {
+            name: 'image_read',
+            description: 'Read a local image file and return it as base64. Supports PNG, JPG, GIF, WebP, BMP, SVG. No browser needed — pure file read. Use for inspecting local screenshots, design assets, or any image on disk. D:\\ paths only — C:\\ is rejected.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                path: {
+                  type: 'string',
+                  description: 'Absolute path to the image file. Must be on D:\\ (not C:\\). Supported extensions: .png .jpg .jpeg .gif .webp .bmp .svg',
+                },
+              },
+              required: ['path'],
+            },
+          },
           // Vault Engine Tools
           {
             name: 'vault_set',
@@ -784,6 +798,9 @@ export class OktyvServer {
 
           case 'browser_session_cleanup':
             return await this.handleBrowserSessionCleanup(args);
+
+          case 'image_read':
+            return await this.handleImageRead(args);
 
           // Vault Engine Tools
           case 'vault_set':
@@ -1706,6 +1723,24 @@ export class OktyvServer {
     }
   }
 
+  private async handleImageRead(args: any): Promise<any> {
+    try {
+      logger.info('Handling image_read', { path: args.path });
+      if (!args.path) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.INVALID_PARAMETERS, message: 'path is required', retryable: false } }, null, 2) }] };
+      }
+      const result = await this.visualConnector.imageRead(args.path);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }],
+      };
+    } catch (error: any) {
+      logger.error('image_read failed', { error });
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'image_read failed', retryable: false } }, null, 2) }],
+      };
+    }
+  }
+
   // Vault Engine Handlers
 
   private async handleVaultSet(args: any): Promise<any> {
@@ -2294,6 +2329,7 @@ export class OktyvServer {
     registry.set('browser_computed_styles', wrapHandler(this.handleBrowserComputedStyles));
     registry.set('browser_batch_audit', wrapHandler(this.handleBrowserBatchAudit));
     registry.set('browser_session_cleanup', wrapHandler(this.handleBrowserSessionCleanup));
+    registry.set('image_read', wrapHandler(this.handleImageRead));
 
     // Register all Vault tools
     registry.set('vault_set', wrapHandler(this.handleVaultSet));

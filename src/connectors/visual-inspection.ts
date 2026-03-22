@@ -14,7 +14,9 @@
  */
 
 import { join } from 'path';
-import { mkdir } from 'fs/promises';
+import { mkdir, readFile } from 'fs/promises';
+import { existsSync, statSync } from 'fs';
+import { extname } from 'path';
 import { createLogger } from '../utils/logger.js';
 import type { BrowserSessionManager } from '../browser/session.js';
 import type { RateLimiter } from '../browser/rate-limiter.js';
@@ -758,4 +760,68 @@ export class VisualInspectionConnector {
 
     return { pageUrl, results };
   }
+
+  // ─────────────────────────────────────────────
+  // image_read — local image file reader
+  // ─────────────────────────────────────────────
+
+  /**
+   * Read a local image file and return it as base64.
+   * Supports PNG, JPG/JPEG, GIF, WebP, BMP, SVG.
+   * No browser needed — pure fs read.
+   * Files must be on D:\ — C:\ paths are rejected.
+   */
+  async imageRead(filePath: string): Promise<ImageReadResult> {
+    // Safety: reject C:\ paths
+    const normalized = filePath.replace(/\\/g, '/');
+    if (normalized.toLowerCase().startsWith('c:/') || normalized.toLowerCase().startsWith('c:\\')) {
+      throw new Error('image_read: C:\\ paths are not permitted. Use D:\\ paths only.');
+    }
+
+    if (!existsSync(filePath)) {
+      throw new Error(`image_read: File not found: ${filePath}`);
+    }
+
+    const stat = statSync(filePath);
+    if (!stat.isFile()) {
+      throw new Error(`image_read: Path is not a file: ${filePath}`);
+    }
+
+    const ext = extname(filePath).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      '.png':  'image/png',
+      '.jpg':  'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif':  'image/gif',
+      '.webp': 'image/webp',
+      '.bmp':  'image/bmp',
+      '.svg':  'image/svg+xml',
+    };
+
+    const mimeType = mimeMap[ext];
+    if (!mimeType) {
+      throw new Error(`image_read: Unsupported file type "${ext}". Supported: ${Object.keys(mimeMap).join(', ')}`);
+    }
+
+    const buffer = await readFile(filePath);
+    const base64 = buffer.toString('base64');
+
+    logger.info('image_read complete', { filePath, mimeType, bytes: stat.size });
+
+    return {
+      path: filePath,
+      mimeType,
+      base64,
+      sizeBytes: stat.size,
+      encoding: 'base64',
+    };
+  }
+}
+
+export interface ImageReadResult {
+  path: string;
+  mimeType: string;
+  base64: string;
+  sizeBytes: number;
+  encoding: 'base64';
 }
