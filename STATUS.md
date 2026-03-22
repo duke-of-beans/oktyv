@@ -59,6 +59,10 @@ working live. First real end-to-end browser automation from Claude Desktop.
 - [ ] Integration with SCRVNR (Oktyv handles file output + delivery)
 - [x] v1.3.0: Visual Inspection Layer — browser_scroll_capture, browser_selector_capture,
        browser_computed_styles, browser_batch_audit, browser_session_cleanup. SHIPPED 2026-03-21.
+- [ ] image_read tool — read local image file (PNG/JPG/GIF/WebP), return base64 for inline
+       display. Completes local visual inspection capability alongside file:// browser support.
+       ~20 lines. No Puppeteer needed — pure fs.readFileSync + base64 encode.
+       Note: browser_navigate already supports file:// for local HTML/PDF/image rendering.
 - [ ] Wire into COVOS Intelligence Engine for automated scan dispatch
 - [ ] Wire into ContentStudio for GAD fleet visual audit automation
 - [ ] Claude in Chrome navigate tool: consistently times out cross-domain — workaround: pre-load tabs manually
