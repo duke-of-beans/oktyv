@@ -1,1 +1,17 @@
-fix: create per-label subdirs in browser_batch_audit before screenshot write  
+refactor(server): migrate Server → McpServer (SDK 1.25.x)
+
+Root cause: deprecated Server class in SDK 1.25.x never responded to
+the MCP initialize handshake, causing Claude Desktop to timeout after
+60 seconds on every startup attempt.
+
+Changes:
+- Replace Server with McpServer from @modelcontextprotocol/sdk/server/mcp.js
+- Replace monolithic setupHandlers() + switch statement with declarative
+  server.tool() registrations using Zod schemas for all 32 tools
+- Remove ListToolsRequestSchema/CallToolRequestSchema manual wiring
+- Remove fileTools spread (tools now registered individually with Zod)
+- All handler methods and business logic unchanged
+- populateToolRegistry() and lifecycle methods unchanged
+
+McpServer handles initialize automatically — no manual protocol wiring
+required. Connection now completes in <1s instead of timing out at 60s.
