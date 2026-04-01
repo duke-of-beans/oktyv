@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "slug": "oktyv",
+  "name": "Oktyv",
+  "brain_entity_id": "01KMWEC4136MBP9D7S32A5CH81",
+  "type": "infrastructure",
+  "owner": "tech_holdco",
+  "environment": "dev",
+  "display_register": "project",
+  "tier": 1,
+  "description": "Oktyv is a universal 8-engine automation layer providing Browser, API, Database, Email, File, Cron, Vault, and Parallel execution engines for AI agents.",
+  "purpose": "Be the hands of AI agents — execute any automation task without judgment. The execution layer for the entire product ecosystem.",
+  "success_criteria": [
+    "Every automation task in the portfolio routes through Oktyv",
+    "Visual inspection v1.4 deployed and used in ContentStudio pipeline"
+  ],
+  "upstream": [],
+  "downstream": [
+    "greglite",
+    "covos-dashboard",
+    "contentstudio"
+  ],
+  "peers": [],
+  "repo": "https://github.com/duke-of-beans/oktyv",
+  "local_url": null,
+  "vercel_url": null,
+  "tech_stack": [
+    "Node.js",
+    "TypeScript",
+    "Puppeteer"
+  ],
+  "language": "TypeScript",
+  "tagline": "Universal automation layer — the hands of AI agents.",
+  "philosophy": [],
+  "notes": "258/258 tests passing. 8 engines confirmed production. Visual inspection layer v1.4 (12 lanes, 92% noise reduction).",
+  "key_decisions": [],
+  "created_date": "2026-03-31",
+  "last_updated": "2026-03-31",
+  "author": "dk-001"
+}

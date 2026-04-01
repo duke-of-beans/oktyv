@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "slug": "oktyv",
+  "brain_entity_id": "01KMWEC4136MBP9D7S32A5CH81",
+  "status": "active",
+  "phase": "v1.3.0 production",
+  "version": "1.3.0",
+  "completion_pct": 90,
+  "last_session": "2026-03-31",
+  "last_updated": "2026-03-31",
+  "blockers": [],
+  "next_action": "Integrate visual inspection v1.4 into ContentStudio GAD fleet pipeline",
+  "open_tasks": [],
+  "quality": {
+    "test_count": null,
+    "tests_passing": null,
+    "tsc_errors": null,
+    "eos_health": null,
+    "last_scan": null
+  },
+  "signals": {
+    "vercel_url": null,
+    "last_deploy": null,
+    "last_deploy_status": null,
+    "last_commit": null,
+    "last_commit_message": null,
+    "last_commit_date": null,
+    "anthropic_credits_ok": null,
+    "domain_active": null
+  },
+  "metrics": {},
+  "changelog": [
+    {
+      "date": "2026-03-31",
+      "version": "1.3.0",
+      "sprint": "META-INFRA-DNA-SEED",
+      "summary": "Initial PROJECT_STATE.json created from PRODUCT_GRAPH.yaml and session context during META-INFRA DNA schema migration.",
+      "shipped": [
+        "PROJECT_STATE.json created",
+        "PROJECT_DNA.json created"
+      ]
+    }
+  ],
+  "open_questions": [],
+  "integrations": []
+}
