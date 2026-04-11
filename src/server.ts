@@ -20,6 +20,7 @@ import { OktyvErrorCode } from './types/mcp.js';
 import { VaultEngine } from './tools/vault/VaultEngine.js';
 import { FileEngine } from './tools/file/FileEngine.js';
 import { ParallelExecutionEngine } from './engines/parallel/ParallelExecutionEngine.js';
+import { ShellEngine } from './engines/shell/ShellEngine.js';
 import { VisualInspectionConnector } from './connectors/visual-inspection.js';
 import { ensureScreenshotsBaseExists } from './browser/session-manager.js';
 
@@ -36,11 +37,12 @@ export class OktyvServer {
   private vaultEngine: VaultEngine;
   private fileEngine: FileEngine;
   private parallelEngine: ParallelExecutionEngine;
+  private shellEngine: ShellEngine;
 
   constructor() {
     this.server = new McpServer({
       name: 'oktyv',
-      version: '1.3.0',
+      version: '1.4.0',
     });
 
     // Initialize browser infrastructure
@@ -68,6 +70,9 @@ export class OktyvServer {
 
     // Register all tools declaratively with Zod schemas
     this.registerTools();
+
+    // Initialize shell engine
+    this.shellEngine = new ShellEngine();
 
     // Populate tool registry for parallel execution engine
     this.populateToolRegistry(toolRegistry);
@@ -457,6 +462,33 @@ export class OktyvServer {
         }).optional().describe('Optional execution configuration'),
       },
       async (args) => this.handleParallelExecute(args),
+    );
+
+    // -- Shell Engine ----------------------------------------------------------
+
+    this.server.tool(
+      'shell_batch',
+      'Execute multiple shell commands concurrently with optional dependency ordering. Returns stdout, stderr, exit code, and timing for each command.',
+      {
+        commands: z.array(
+          z.object({
+            id: z.string().describe('Unique identifier'),
+            cmd: z.string().describe('Shell command string'),
+            cwd: z.string().optional().describe('Working directory'),
+            env: z.record(z.string()).optional().describe('Extra environment variables'),
+            timeout: z.number().optional().describe('Per-command timeout ms'),
+            shell: z.enum(['powershell', 'cmd', 'bash', 'sh']).optional().describe('Shell override'),
+            dependsOn: z.array(z.string()).optional().describe('Command IDs to wait for'),
+          })
+        ).min(1).describe('Commands to execute'),
+        config: z.object({
+          maxConcurrent: z.number().optional().describe('Max simultaneous processes (default: 5)'),
+          failureMode: z.enum(['continue', 'stop']).optional().describe('Stop or continue on failure'),
+          defaultTimeout: z.number().optional().describe('Default timeout ms (default: 300000)'),
+          defaultShell: z.string().optional().describe('Default shell'),
+        }).optional(),
+      },
+      async (args) => this.handleShellBatch(args),
     );
 
     logger.info('All tools registered');
@@ -941,6 +973,20 @@ export class OktyvServer {
     } catch (error: any) {
       logger.error('Parallel execution failed', { error });
       return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'Parallel execution failed', retryable: error.retryable !== false } }, null, 2) }] };
+    }
+  }
+
+  private async handleShellBatch(args: any): Promise<any> {
+    try {
+      logger.info('Handling shell_batch', { commandCount: args.commands?.length });
+      if (!args.commands || !Array.isArray(args.commands) || args.commands.length === 0) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.INVALID_PARAMETERS, message: 'commands array is required and must not be empty', retryable: false } }, null, 2) }] };
+      }
+      const result = await this.shellEngine.execute({ commands: args.commands, config: args.config });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('shell_batch failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'shell_batch failed' } }, null, 2) }] };
     }
   }
 
