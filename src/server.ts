@@ -52,7 +52,7 @@ export class OktyvServer {
   constructor() {
     this.server = new McpServer({
       name: 'oktyv',
-      version: '1.4.0',
+      version: '1.6.0',
     });
 
     // Initialize browser infrastructure

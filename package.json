@@ -1,6 +1,6 @@
 {
   "name": "oktyv",
-  "version": "1.4.0",
+  "version": "1.6.0",
   "description": "Universal automation layer - Production ready with complete hardening suite",
   "main": "dist/index.js",
   "bin": {

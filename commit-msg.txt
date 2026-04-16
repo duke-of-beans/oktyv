@@ -1,1 +1,1 @@
-docs: v1.6.0 — STATUS, BACKLOG, README updated for 69 tools
+chore: bump version to 1.6.0 in package.json and server.ts
