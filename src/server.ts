@@ -19,6 +19,7 @@ import type { JobSearchParams } from './types/job.js';
 import { OktyvErrorCode } from './types/mcp.js';
 import { VaultEngine } from './tools/vault/VaultEngine.js';
 import { FileEngine } from './tools/file/FileEngine.js';
+import { ApiEngine } from './tools/api/ApiEngine.js';
 import { ParallelExecutionEngine } from './engines/parallel/ParallelExecutionEngine.js';
 import { ShellEngine } from './engines/shell/ShellEngine.js';
 import { VisualInspectionConnector } from './connectors/visual-inspection.js';
@@ -36,6 +37,7 @@ export class OktyvServer {
   private visualConnector: VisualInspectionConnector;
   private vaultEngine: VaultEngine;
   private fileEngine: FileEngine;
+  private apiEngine: ApiEngine;
   private parallelEngine: ParallelExecutionEngine;
   private shellEngine: ShellEngine;
 
@@ -60,6 +62,12 @@ export class OktyvServer {
 
     // Initialize vault infrastructure
     this.vaultEngine = new VaultEngine();
+
+    // Initialize API engine — pass vault bridge functions so OAuthManager can store tokens
+    this.apiEngine = new ApiEngine(
+      (vaultName: string, key: string) => this.vaultEngine.get(vaultName, key),
+      (vaultName: string, key: string, value: string) => this.vaultEngine.set(vaultName, key, value)
+    );
 
     // Initialize file infrastructure
     this.fileEngine = new FileEngine();
@@ -489,6 +497,62 @@ export class OktyvServer {
         }).optional(),
       },
       async (args) => this.handleShellBatch(args),
+    );
+
+    // -- API Engine -----------------------------------------------------------
+
+    this.server.tool(
+      'api_request',
+      'Make an authenticated HTTP request to any API. Reads credentials from vault when vaultName+credentialName provided. Supports GET/POST/PUT/PATCH/DELETE.',
+      {
+        url: z.string().url().describe('URL to request'),
+        method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']).optional().default('GET'),
+        headers: z.record(z.string()).optional().describe('HTTP headers'),
+        params: z.record(z.union([z.string(), z.number(), z.boolean()])).optional().describe('Query parameters'),
+        data: z.any().optional().describe('Request body'),
+        vaultName: z.string().optional().describe('Vault to pull bearer token from'),
+        credentialName: z.string().optional().describe('Credential name in vault'),
+        tokenPrefix: z.string().optional().default('Bearer').describe('Token prefix (Bearer, sso-key, etc.)'),
+      },
+      async (args) => this.handleApiRequest(args),
+    );
+
+    this.server.tool(
+      'api_oauth_init',
+      'Start an OAuth flow — returns the authorization URL for the user to visit. Supports google, github, stripe, slack, zoho.',
+      {
+        provider: z.enum(['google', 'github', 'stripe', 'slack', 'zoho']).describe('OAuth provider'),
+        clientId: z.string().describe('OAuth client ID'),
+        redirectUri: z.string().url().describe('Redirect URI'),
+        scopes: z.array(z.string()).describe('Scopes to request'),
+      },
+      async (args) => this.handleApiOAuthInit(args),
+    );
+
+    this.server.tool(
+      'api_oauth_callback',
+      'Complete OAuth flow — exchange authorization code for tokens and store in vault.',
+      {
+        provider: z.enum(['google', 'github', 'stripe', 'slack', 'zoho']).describe('OAuth provider'),
+        clientId: z.string().describe('OAuth client ID'),
+        clientSecret: z.string().describe('OAuth client secret'),
+        code: z.string().describe('Authorization code from callback'),
+        redirectUri: z.string().url().describe('Redirect URI (must match init)'),
+        userId: z.string().describe('Identifier to store tokens under (e.g. david)'),
+      },
+      async (args) => this.handleApiOAuthCallback(args),
+    );
+
+    this.server.tool(
+      'api_oauth_refresh',
+      'Refresh an expired OAuth access token using the stored refresh token.',
+      {
+        provider: z.enum(['google', 'github', 'stripe', 'slack', 'zoho']).describe('OAuth provider'),
+        userId: z.string().describe('User identifier (must match what was used in callback)'),
+        clientId: z.string().describe('OAuth client ID'),
+        clientSecret: z.string().describe('OAuth client secret'),
+      },
+      async (args) => this.handleApiOAuthRefresh(args),
     );
 
     logger.info('All tools registered');
@@ -991,6 +1055,74 @@ export class OktyvServer {
   }
 
   // ============================================================================
+  // Handler Methods — API Engine
+  // ============================================================================
+
+  private async handleApiRequest(args: any): Promise<any> {
+    try {
+      logger.info('Handling api_request', { url: args.url, method: args.method });
+      const headers: Record<string, string> = { ...(args.headers || {}) };
+      if (args.vaultName && args.credentialName) {
+        const token = await this.vaultEngine.get(args.vaultName, args.credentialName);
+        const prefix = args.tokenPrefix || 'Bearer';
+        headers['Authorization'] = `${prefix} ${token}`;
+      }
+      const result = await this.apiEngine.request(args.url, {
+        method: args.method || 'GET',
+        headers,
+        params: args.params,
+        data: args.data,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('api_request failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'api_request failed', retryable: false } }, null, 2) }] };
+    }
+  }
+
+  private async handleApiOAuthInit(args: any): Promise<any> {
+    try {
+      logger.info('Handling api_oauth_init', { provider: args.provider });
+      const oauth = this.apiEngine.getOAuthManager();
+      const result = await oauth.buildAuthUrl(args.provider, args.clientId, args.redirectUri, args.scopes);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('api_oauth_init failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'api_oauth_init failed', retryable: false } }, null, 2) }] };
+    }
+  }
+
+  private async handleApiOAuthCallback(args: any): Promise<any> {
+    try {
+      logger.info('Handling api_oauth_callback', { provider: args.provider, userId: args.userId });
+      const oauth = this.apiEngine.getOAuthManager();
+      const tokens = await oauth.exchangeCodeForTokens(
+        args.provider, args.clientId, args.clientSecret, args.code, args.redirectUri
+      );
+      await oauth.storeTokens(args.provider, args.userId, tokens);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { stored: true, provider: args.provider, userId: args.userId, expiresAt: tokens.expires_at } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('api_oauth_callback failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'api_oauth_callback failed', retryable: false } }, null, 2) }] };
+    }
+  }
+
+  private async handleApiOAuthRefresh(args: any): Promise<any> {
+    try {
+      logger.info('Handling api_oauth_refresh', { provider: args.provider, userId: args.userId });
+      const oauth = this.apiEngine.getOAuthManager();
+      const existing = await oauth.getTokens(args.provider, args.userId);
+      if (!existing?.refresh_token) throw new Error('No refresh token found — re-authorize the OAuth flow');
+      const tokens = await oauth.refreshTokens(args.provider, args.clientId, args.clientSecret, existing.refresh_token);
+      await oauth.storeTokens(args.provider, args.userId, tokens);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { refreshed: true, provider: args.provider, userId: args.userId, expiresAt: tokens.expires_at } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('api_oauth_refresh failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'api_oauth_refresh failed', retryable: false } }, null, 2) }] };
+    }
+  }
+
+  // ============================================================================
   // Tool Registry for Parallel Execution Engine
   // ============================================================================
 
@@ -1043,6 +1175,10 @@ export class OktyvServer {
     registry.set('file_archive_create', wrapHandler(this.handleFileArchiveCreate));
     registry.set('file_archive_extract', wrapHandler(this.handleFileArchiveExtract));
     registry.set('file_archive_list', wrapHandler(this.handleFileArchiveList));
+    registry.set('api_request', wrapHandler(this.handleApiRequest));
+    registry.set('api_oauth_init', wrapHandler(this.handleApiOAuthInit));
+    registry.set('api_oauth_callback', wrapHandler(this.handleApiOAuthCallback));
+    registry.set('api_oauth_refresh', wrapHandler(this.handleApiOAuthRefresh));
 
     logger.info('Tool registry populated for parallel execution', { toolCount: registry.size });
   }

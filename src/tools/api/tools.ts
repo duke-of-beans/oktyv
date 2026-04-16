@@ -45,7 +45,7 @@ export const apiRequestSchema = z.object({
   // OAuth
   oauthProvider: z.string()
     .optional()
-    .describe('OAuth provider name (google, github, stripe, slack)'),
+    .describe('OAuth provider name (google, github, stripe, slack, zoho)'),
   oauthUserId: z.string()
     .optional()
     .describe('User ID for OAuth token lookup'),
@@ -69,7 +69,7 @@ export const apiRequestTool = {
  * Initialize OAuth flow by generating authorization URL.
  */
 export const apiOAuthInitSchema = z.object({
-  provider: z.enum(['google', 'github', 'stripe', 'slack'])
+  provider: z.enum(['google', 'github', 'stripe', 'slack', 'zoho'])
     .describe('OAuth provider'),
   clientId: z.string()
     .describe('OAuth client ID'),
@@ -92,7 +92,7 @@ export const apiOAuthInitTool = {
  * Complete OAuth flow by exchanging authorization code for tokens.
  */
 export const apiOAuthCallbackSchema = z.object({
-  provider: z.enum(['google', 'github', 'stripe', 'slack'])
+  provider: z.enum(['google', 'github', 'stripe', 'slack', 'zoho'])
     .describe('OAuth provider'),
   clientId: z.string()
     .describe('OAuth client ID'),
@@ -122,7 +122,7 @@ export const apiOAuthCallbackTool = {
  * Manually refresh OAuth access token.
  */
 export const apiOAuthRefreshSchema = z.object({
-  provider: z.enum(['google', 'github', 'stripe', 'slack'])
+  provider: z.enum(['google', 'github', 'stripe', 'slack', 'zoho'])
     .describe('OAuth provider'),
   userId: z.string()
     .describe('User identifier'),

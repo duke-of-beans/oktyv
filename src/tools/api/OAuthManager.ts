@@ -128,6 +128,25 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProvider> = {
     pkce: false,
     refreshable: true,
   },
+
+  zoho: {
+    name: 'Zoho',
+    authUrl: 'https://accounts.zoho.com/oauth/v2/auth',
+    tokenUrl: 'https://accounts.zoho.com/oauth/v2/token',
+    scopes: {
+      // Mail
+      mail_read: 'ZohoMail.messages.READ',
+      mail_send: 'ZohoMail.messages.CREATE',
+      mail_accounts: 'ZohoMail.accounts.READ',
+      // CRM
+      crm_read: 'ZohoCRM.modules.READ',
+      crm_write: 'ZohoCRM.modules.CREATE,ZohoCRM.modules.UPDATE',
+      // Domains / Admin
+      zeptomail: 'ZeptoMail.accounts.READ',
+    },
+    pkce: false,
+    refreshable: true,
+  },
 };
 
 /**
