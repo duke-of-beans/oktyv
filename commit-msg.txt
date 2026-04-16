@@ -1,1 +1,1 @@
-docs: README rewrite for v1.5.0 — full tool reference, all 37 tools, all 10 engines
+docs: backlog reconciled, stale items closed, P3 gaps documented
