@@ -1,8 +1,8 @@
 # OKTYV — STATUS
 
 **Status:** active
-**Phase:** v1.5.0 — API Engine MCP tools
-**Last Sprint:** v1.5.0
+**Phase:** v1.6.0 — All engines live (69 tools)
+**Last Sprint:** v1.6.0
 **Last Updated:** 2026-04-16
 
 ---
@@ -19,14 +19,14 @@ real world calls Oktyv.
 
 ## CURRENT STATE
 
-v1.5.0 shipped 2026-04-16. API Engine wired as MCP tools. 4 new tools:
-api_request (vault-backed authenticated HTTP), api_oauth_init (generates auth URL),
-api_oauth_callback (exchanges code for tokens, stores in vault), api_oauth_refresh
-(refreshes expired tokens). OAuthManager extended with Zoho provider.
-api_request reads credentials from Oktyv vault by name — any token prefix supported
-(Bearer, sso-key, etc.) making GoDaddy/Vercel/GitHub/Neon calls native.
+v1.6.0 shipped 2026-04-16. All remaining engines wired as MCP tools. 32 new tools:
+Email (8): gmail send/read/search, SMTP connect/send, IMAP connect/fetch, parse.
+Cron (12): create/update/delete/list/get/enable/disable/execute-now/history/stats/clear/validate.
+Database (9): connect/query/insert/update/delete/transaction/raw-query/aggregate/disconnect.
+Indeed (3): search_jobs/get_job/get_company.
+Total: 37 → 69 tools across 10 engines. All engines fully operational as MCP tools.
 
-v1.4.0 shipped 2026-04-11. Shell Engine complete.
+v1.5.0 shipped 2026-04-16. API Engine wired as MCP tools.
 Runs N shell commands concurrently as child processes with DAG-based dependency ordering.
 Returns stdout, stderr, exit code, timing per command. Supports powershell/cmd/bash/sh.
 Solves the sequential Desktop Commander bottleneck for independent shell tasks
@@ -50,8 +50,11 @@ v1.2.0 shipped 2026-03-20. All 8 engines complete. Browser engine operational.
 
 ## WHAT IS OPERATIONAL
 
+- Email Engine — email_gmail_send/read/search, email_smtp_connect/send, email_imap_connect/fetch, email_parse ✅ (SHIPPED 2026-04-16)
+- Cron Engine — 12 tools: create/update/delete/list/get/enable/disable/execute-now/history/stats/clear/validate ✅ (SHIPPED 2026-04-16)
+- Database Engine — 9 tools: connect/query/insert/update/delete/transaction/raw-query/aggregate/disconnect ✅ (SHIPPED 2026-04-16)
+- Indeed Connector — indeed_search_jobs, indeed_get_job, indeed_get_company ✅ (SHIPPED 2026-04-16)
 - API Engine — api_request, api_oauth_init, api_oauth_callback, api_oauth_refresh ✅ (SHIPPED 2026-04-16)
-- Shell Engine — shell_batch, concurrent child processes, DAG deps, powershell/cmd/bash ✅ (SHIPPED 2026-04-11)
 - Browser Engine — Puppeteer, LinkedIn/Indeed/Wellfound connectors ✅
 - Visual Inspection Layer — scroll_capture, selector_capture, computed_styles, batch_audit ✅
 - Vault Engine — AES-256-GCM, OS keychain ✅

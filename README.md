@@ -2,7 +2,7 @@
 
 Universal automation execution layer for AI agents.
 
-**Version:** 1.5.0 | **Status:** Production | **Tools:** 37 | **Engines:** 10
+**Version:** 1.6.0 | **Status:** Production | **Tools:** 69 | **Engines:** 10
 
 > GREGORE orchestrates. Oktyv executes.
 
@@ -16,6 +16,9 @@ Oktyv is a Model Context Protocol (MCP) server that gives Claude the ability to 
 |---|---|---|
 | **API** | `api_request` `api_oauth_init` `api_oauth_callback` `api_oauth_refresh` | Vault-backed authenticated HTTP, OAuth 2.0 flows (Google, GitHub, Stripe, Slack, Zoho) |
 | **Shell** | `shell_batch` | Run N shell commands concurrently as child processes with DAG-based dependency ordering |
+| **Email** | `email_gmail_send` `email_gmail_read` `email_gmail_search` `email_smtp_connect` `email_smtp_send` `email_imap_connect` `email_imap_fetch` `email_parse` | Gmail OAuth, SMTP send, IMAP receive, full email parsing |
+| **Cron** | `cron_create_task` `cron_update_task` `cron_delete_task` `cron_list_tasks` `cron_get_task` `cron_enable_task` `cron_disable_task` `cron_execute_now` `cron_get_history` `cron_get_statistics` `cron_clear_history` `cron_validate_expression` | Scheduled automation with cron/interval/once scheduling, SQLite persistence, timezone support |
+| **Database** | `db_connect` `db_query` `db_insert` `db_update` `db_delete` `db_transaction` `db_raw_query` `db_aggregate` `db_disconnect` | PostgreSQL, MySQL, SQLite, MongoDB — vault-backed connection strings, ACID transactions |
 | **Browser** | `browser_navigate` `browser_click` `browser_type` `browser_extract` `browser_screenshot` `browser_pdf` `browser_form_fill` | Puppeteer-based browser automation |
 | **Visual Inspection** | `browser_scroll_capture` `browser_selector_capture` `browser_computed_styles` `browser_batch_audit` `browser_session_cleanup` | Automated visual QA — scroll capture, element capture, computed styles, parallel audits |
 | **Parallel Execution** | `parallel_execute` | Execute multiple Oktyv tools concurrently with DAG-based dependency resolution |
@@ -24,6 +27,7 @@ Oktyv is a Model Context Protocol (MCP) server that gives Claude the ability to 
 | **Image** | `image_read` | Read local image files, return base64 — PNG, JPG, GIF, WebP, BMP, SVG |
 | **LinkedIn** | `linkedin_search_jobs` `linkedin_get_job` `linkedin_get_company` | Job search and company lookup via LinkedIn |
 | **Wellfound** | `wellfound_search_jobs` `wellfound_get_job` `wellfound_get_company` | Startup-focused job board (formerly AngelList Talent) |
+| **Indeed** | `indeed_search_jobs` `indeed_get_job` `indeed_get_company` | Job search and company lookup via Indeed |
 
 ---
 
@@ -302,6 +306,7 @@ Claude
 
 | Version | Date | Changes |
 |---|---|---|
+| **1.6.0** | 2026-04-16 | Email (8), Cron (12), Database (9), Indeed (3) engines wired as MCP tools — 37→69 total tools. Indeed connector bug fixes. |
 | **1.5.0** | 2026-04-16 | API Engine MCP tools — `api_request`, `api_oauth_init`, `api_oauth_callback`, `api_oauth_refresh`. Zoho added as OAuth provider. Vault-backed auth for any API. |
 | **1.4.0** | 2026-04-11 | Shell Engine — `shell_batch`, concurrent child processes, DAG deps, powershell/cmd/bash/sh |
 | 1.3.0 | 2026-03-27 | McpServer migration (SDK 1.25.x) — deprecated Server → McpServer with Zod schemas, fixes Claude Desktop 60s timeout |

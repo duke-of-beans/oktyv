@@ -19,6 +19,10 @@ Last Updated: 2026-04-16
 - [ ] Indeed job board connector — files exist (indeed-search.ts, indeed-job.ts, indeed-company.ts) but not wired into server.ts
 
 ## Completed
+- [x] v1.6.0: Email engine MCP tools (8 tools: Gmail, SMTP, IMAP, parse)
+- [x] v1.6.0: Cron engine MCP tools (12 tools: task management, history, validation)
+- [x] v1.6.0: Database engine MCP tools (9 tools: PostgreSQL, MySQL, SQLite, MongoDB)
+- [x] v1.6.0: Indeed connector MCP tools (3 tools: search, job detail, company)
 - [x] v1.5.0: API engine MCP tools — api_request (vault-backed), api_oauth_init/callback/refresh, Zoho OAuth provider
 - [x] v1.4.0: Shell Engine — shell_batch, concurrent child processes, DAG deps
 - [x] v1.3.0: image_read tool — local image file → base64, no Puppeteer
