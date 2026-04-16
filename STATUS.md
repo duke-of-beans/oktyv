@@ -1,9 +1,9 @@
 # OKTYV — STATUS
 
 **Status:** active
-**Phase:** v1.4.0 — Shell Engine (shell_batch)
-**Last Sprint:** v1.4.0
-**Last Updated:** 2026-04-11
+**Phase:** v1.5.0 — API Engine MCP tools
+**Last Sprint:** v1.5.0
+**Last Updated:** 2026-04-16
 
 ---
 
@@ -19,7 +19,14 @@ real world calls Oktyv.
 
 ## CURRENT STATE
 
-v1.4.0 shipped 2026-04-11. Shell Engine complete. New MCP tool: shell_batch.
+v1.5.0 shipped 2026-04-16. API Engine wired as MCP tools. 4 new tools:
+api_request (vault-backed authenticated HTTP), api_oauth_init (generates auth URL),
+api_oauth_callback (exchanges code for tokens, stores in vault), api_oauth_refresh
+(refreshes expired tokens). OAuthManager extended with Zoho provider.
+api_request reads credentials from Oktyv vault by name — any token prefix supported
+(Bearer, sso-key, etc.) making GoDaddy/Vercel/GitHub/Neon calls native.
+
+v1.4.0 shipped 2026-04-11. Shell Engine complete.
 Runs N shell commands concurrently as child processes with DAG-based dependency ordering.
 Returns stdout, stderr, exit code, timing per command. Supports powershell/cmd/bash/sh.
 Solves the sequential Desktop Commander bottleneck for independent shell tasks
@@ -43,6 +50,7 @@ v1.2.0 shipped 2026-03-20. All 8 engines complete. Browser engine operational.
 
 ## WHAT IS OPERATIONAL
 
+- API Engine — api_request, api_oauth_init, api_oauth_callback, api_oauth_refresh ✅ (SHIPPED 2026-04-16)
 - Shell Engine — shell_batch, concurrent child processes, DAG deps, powershell/cmd/bash ✅ (SHIPPED 2026-04-11)
 - Browser Engine — Puppeteer, LinkedIn/Indeed/Wellfound connectors ✅
 - Visual Inspection Layer — scroll_capture, selector_capture, computed_styles, batch_audit ✅
