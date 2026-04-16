@@ -20,6 +20,10 @@ import { OktyvErrorCode } from './types/mcp.js';
 import { VaultEngine } from './tools/vault/VaultEngine.js';
 import { FileEngine } from './tools/file/FileEngine.js';
 import { ApiEngine } from './tools/api/ApiEngine.js';
+import { EmailEngine } from './tools/email/EmailEngine.js';
+import { CronEngine } from './tools/cron/CronEngine.js';
+import { DatabaseEngine } from './tools/database/DatabaseEngine.js';
+import { IndeedConnector } from './connectors/indeed.js';
 import { ParallelExecutionEngine } from './engines/parallel/ParallelExecutionEngine.js';
 import { ShellEngine } from './engines/shell/ShellEngine.js';
 import { VisualInspectionConnector } from './connectors/visual-inspection.js';
@@ -38,6 +42,10 @@ export class OktyvServer {
   private vaultEngine: VaultEngine;
   private fileEngine: FileEngine;
   private apiEngine: ApiEngine;
+  private emailEngine: EmailEngine;
+  private cronEngine: CronEngine;
+  private databaseEngine: DatabaseEngine;
+  private indeedConnector: IndeedConnector;
   private parallelEngine: ParallelExecutionEngine;
   private shellEngine: ShellEngine;
 
@@ -68,6 +76,23 @@ export class OktyvServer {
       (vaultName: string, key: string) => this.vaultEngine.get(vaultName, key),
       (vaultName: string, key: string, value: string) => this.vaultEngine.set(vaultName, key, value)
     );
+
+    // Initialize email engine
+    this.emailEngine = new EmailEngine(
+      (vault: string, key: string) => this.vaultEngine.get(vault, key),
+      (url: string, options?: any) => this.apiEngine.request(url, options)
+    );
+
+    // Initialize cron engine
+    this.cronEngine = new CronEngine();
+
+    // Initialize database engine
+    this.databaseEngine = new DatabaseEngine(
+      (vault: string, key: string) => this.vaultEngine.get(vault, key)
+    );
+
+    // Initialize Indeed connector
+    this.indeedConnector = new IndeedConnector(this.sessionManager, this.rateLimiter);
 
     // Initialize file infrastructure
     this.fileEngine = new FileEngine();
@@ -554,6 +579,236 @@ export class OktyvServer {
       },
       async (args) => this.handleApiOAuthRefresh(args),
     );
+
+    // -- Indeed Connector -------------------------------------------------------
+
+    this.server.tool('indeed_search_jobs', 'Search for jobs on Indeed with keyword and location filters', {
+      keywords: z.string().optional().describe('Job title, skills, or keywords'),
+      location: z.string().optional().describe('City, state, or country'),
+      remote: z.boolean().optional().describe('Filter for remote positions'),
+      limit: z.number().min(1).max(50).optional().describe('Maximum results (default: 10)'),
+    }, async (args) => this.handleIndeedSearchJobs(args));
+
+    this.server.tool('indeed_get_job', 'Get full job details from Indeed by job key', {
+      jobKey: z.string().describe('Indeed job key (jk= param from search results)'),
+      includeCompany: z.boolean().optional().describe('Also fetch company details (default: false)'),
+    }, async (args) => this.handleIndeedGetJob(args));
+
+    this.server.tool('indeed_get_company', 'Get company profile from Indeed', {
+      companyId: z.string().describe('Indeed company ID or slug'),
+    }, async (args) => this.handleIndeedGetCompany(args));
+
+    // -- Email Engine -----------------------------------------------------------
+
+    this.server.tool('email_smtp_connect', 'Connect to SMTP server for sending email. Credentials from vault or direct.', {
+      connectionId: z.string().describe('Unique identifier for this connection'),
+      host: z.string().describe('SMTP server host (e.g. smtp.resend.com)'),
+      port: z.number().describe('SMTP port (465 for SSL, 587 for TLS)'),
+      secure: z.boolean().describe('Use SSL (true for port 465)'),
+      vaultName: z.string().optional().describe('Vault name for credentials'),
+      credentialName: z.string().optional().describe('Credential in vault (format: username:password)'),
+      username: z.string().optional().describe('SMTP username (alternative to vault)'),
+      password: z.string().optional().describe('SMTP password (alternative to vault)'),
+    }, async (args) => this.handleEmailSmtpConnect(args));
+
+    this.server.tool('email_smtp_send', 'Send email via connected SMTP server', {
+      connectionId: z.string().describe('SMTP connection identifier'),
+      from: z.string().email().describe('Sender email address'),
+      to: z.array(z.string().email()).describe('Recipient email addresses'),
+      subject: z.string().describe('Email subject'),
+      text: z.string().optional().describe('Plain text body'),
+      html: z.string().optional().describe('HTML body'),
+      cc: z.array(z.string().email()).optional().describe('CC recipients'),
+      bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
+      replyTo: z.string().email().optional().describe('Reply-To address'),
+    }, async (args) => this.handleEmailSmtpSend(args));
+
+    this.server.tool('email_imap_connect', 'Connect to IMAP server for reading email', {
+      connectionId: z.string().describe('Unique identifier for this connection'),
+      host: z.string().describe('IMAP server host (e.g. imap.gmail.com)'),
+      port: z.number().describe('IMAP port (993 for SSL, 143 for TLS)'),
+      secure: z.boolean().describe('Use SSL (true for port 993)'),
+      vaultName: z.string().optional().describe('Vault name for credentials'),
+      credentialName: z.string().optional().describe('Credential in vault (format: username:password)'),
+      username: z.string().optional().describe('IMAP username (alternative to vault)'),
+      password: z.string().optional().describe('IMAP password (alternative to vault)'),
+    }, async (args) => this.handleEmailImapConnect(args));
+
+    this.server.tool('email_imap_fetch', 'Fetch emails from IMAP server with optional filtering', {
+      connectionId: z.string().describe('IMAP connection identifier'),
+      folder: z.string().optional().describe('Mailbox folder (default: INBOX)'),
+      criteria: z.array(z.string()).optional().describe('Search criteria e.g. ["UNSEEN"] or ["FROM", "example@email.com"]'),
+      limit: z.number().optional().describe('Max emails to fetch (default: 10)'),
+      markSeen: z.boolean().optional().describe('Mark as seen after fetching (default: false)'),
+    }, async (args) => this.handleEmailImapFetch(args));
+
+    this.server.tool('email_gmail_send', 'Send email via Gmail API (requires OAuth token in vault)', {
+      userId: z.string().describe('Gmail user email address'),
+      to: z.array(z.string().email()).describe('Recipient email addresses'),
+      subject: z.string().describe('Email subject'),
+      body: z.string().describe('Email body (plain text or HTML)'),
+      html: z.boolean().optional().describe('Whether body is HTML (default: false)'),
+      cc: z.array(z.string().email()).optional().describe('CC recipients'),
+      bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
+    }, async (args) => this.handleEmailGmailSend(args));
+
+    this.server.tool('email_gmail_read', 'List and read emails from Gmail using search query', {
+      userId: z.string().describe('Gmail user email address'),
+      query: z.string().optional().describe('Gmail search query (e.g. "is:unread", "from:someone@example.com")'),
+      maxResults: z.number().optional().describe('Max results (default: 10)'),
+    }, async (args) => this.handleEmailGmailRead(args));
+
+    this.server.tool('email_gmail_search', 'Search Gmail messages with advanced query syntax', {
+      userId: z.string().describe('Gmail user email address'),
+      query: z.string().describe('Gmail search query (e.g. "subject:invoice after:2025/01/01")'),
+      maxResults: z.number().optional().describe('Max results (default: 10)'),
+    }, async (args) => this.handleEmailGmailSearch(args));
+
+    this.server.tool('email_parse', 'Parse a raw MIME email message and extract content', {
+      raw: z.string().describe('Raw email message in MIME format'),
+      includeAttachments: z.boolean().optional().describe('Extract attachments (default: true)'),
+    }, async (args) => this.handleEmailParse(args));
+
+    // -- Cron Engine ------------------------------------------------------------
+
+    this.server.tool('cron_create_task', 'Create a scheduled task with cron expression, interval, or one-time execution', {
+      name: z.string().describe('Task name'),
+      description: z.string().optional().describe('Task description'),
+      scheduleType: z.enum(['cron', 'interval', 'once']).describe('Schedule type'),
+      cronExpression: z.string().optional().describe('Cron expression e.g. "0 9 * * *" for 9 AM daily'),
+      interval: z.number().optional().describe('Interval in milliseconds (for interval type)'),
+      executeAt: z.string().optional().describe('ISO datetime for one-time execution'),
+      actionType: z.enum(['http', 'webhook', 'file', 'database', 'email']).describe('Action type to execute'),
+      actionConfig: z.record(z.any()).describe('Action-specific configuration'),
+      timezone: z.string().optional().describe('Timezone (default: UTC)'),
+      retryCount: z.number().optional().describe('Retries on failure (default: 0)'),
+      timeout: z.number().optional().describe('Execution timeout ms (default: 30000)'),
+      enabled: z.boolean().optional().describe('Enable immediately (default: true)'),
+    }, async (args) => this.handleCronCreateTask(args));
+
+    this.server.tool('cron_list_tasks', 'List all scheduled tasks with optional filters', {
+      enabled: z.boolean().optional().describe('Filter by enabled status'),
+      scheduleType: z.enum(['cron', 'interval', 'once']).optional().describe('Filter by schedule type'),
+      limit: z.number().optional().describe('Max results (default: 50)'),
+    }, async (args) => this.handleCronListTasks(args));
+
+    this.server.tool('cron_get_task', 'Get details of a specific scheduled task', {
+      taskId: z.string().describe('Task ID'),
+    }, async (args) => this.handleCronGetTask(args));
+
+    this.server.tool('cron_enable_task', 'Enable a scheduled task', {
+      taskId: z.string().describe('Task ID'),
+    }, async (args) => this.handleCronEnableTask(args));
+
+    this.server.tool('cron_disable_task', 'Disable a scheduled task', {
+      taskId: z.string().describe('Task ID'),
+    }, async (args) => this.handleCronDisableTask(args));
+
+    this.server.tool('cron_delete_task', 'Delete a scheduled task permanently', {
+      taskId: z.string().describe('Task ID'),
+    }, async (args) => this.handleCronDeleteTask(args));
+
+    this.server.tool('cron_execute_now', 'Execute a task immediately, ignoring its schedule', {
+      taskId: z.string().describe('Task ID'),
+    }, async (args) => this.handleCronExecuteNow(args));
+
+    this.server.tool('cron_update_task', 'Update an existing scheduled task', {
+      taskId: z.string().describe('Task ID'),
+      name: z.string().optional().describe('New name'),
+      cronExpression: z.string().optional().describe('New cron expression'),
+      interval: z.number().optional().describe('New interval ms'),
+      actionConfig: z.record(z.any()).optional().describe('New action config'),
+      timezone: z.string().optional().describe('New timezone'),
+      timeout: z.number().optional().describe('New timeout ms'),
+    }, async (args) => this.handleCronUpdateTask(args));
+
+    this.server.tool('cron_get_history', 'Get execution history for a task', {
+      taskId: z.string().describe('Task ID'),
+      limit: z.number().optional().describe('Max results (default: 50)'),
+    }, async (args) => this.handleCronGetHistory(args));
+
+    this.server.tool('cron_get_statistics', 'Get execution statistics for a task', {
+      taskId: z.string().describe('Task ID'),
+    }, async (args) => this.handleCronGetStatistics(args));
+
+    this.server.tool('cron_clear_history', 'Clear execution history for a task', {
+      taskId: z.string().describe('Task ID'),
+    }, async (args) => this.handleCronClearHistory(args));
+
+    this.server.tool('cron_validate_expression', 'Validate a cron expression and get next run times', {
+      expression: z.string().describe('Cron expression to validate'),
+      timezone: z.string().optional().describe('Timezone for next run calculation'),
+    }, async (args) => this.handleCronValidateExpression(args));
+
+    // -- Database Engine --------------------------------------------------------
+
+    this.server.tool('db_connect', 'Connect to a database (PostgreSQL, MySQL, SQLite, MongoDB). Credentials from vault or direct connection string.', {
+      connectionId: z.string().describe('Unique identifier for this connection'),
+      type: z.enum(['postgresql', 'mysql', 'sqlite', 'mongodb']).describe('Database type'),
+      vaultName: z.string().optional().describe('Vault name containing connection string'),
+      credentialName: z.string().optional().describe('Credential name in vault'),
+      connectionString: z.string().optional().describe('Direct connection string (alternative to vault)'),
+      poolSize: z.number().optional().describe('Connection pool size (default: 10)'),
+    }, async (args) => this.handleDbConnect(args));
+
+    this.server.tool('db_query', 'Query records from a table or collection', {
+      connectionId: z.string().describe('Connection identifier'),
+      table: z.string().describe('Table name (SQL) or collection name (MongoDB)'),
+      where: z.record(z.any()).optional().describe('Filter conditions'),
+      select: z.array(z.string()).optional().describe('Columns to select (SQL only)'),
+      orderBy: z.record(z.enum(['asc', 'desc'])).optional().describe('Sort order'),
+      limit: z.number().optional().describe('Max records to return'),
+      offset: z.number().optional().describe('Records to skip'),
+    }, async (args) => this.handleDbQuery(args));
+
+    this.server.tool('db_insert', 'Insert one or more records into a table or collection', {
+      connectionId: z.string().describe('Connection identifier'),
+      table: z.string().describe('Table or collection name'),
+      data: z.union([z.record(z.any()), z.array(z.record(z.any()))]).describe('Record(s) to insert'),
+    }, async (args) => this.handleDbInsert(args));
+
+    this.server.tool('db_update', 'Update records matching the WHERE clause', {
+      connectionId: z.string().describe('Connection identifier'),
+      table: z.string().describe('Table or collection name'),
+      where: z.record(z.any()).describe('Filter conditions (required)'),
+      data: z.record(z.any()).describe('Data to update'),
+    }, async (args) => this.handleDbUpdate(args));
+
+    this.server.tool('db_delete', 'Delete records matching the WHERE clause', {
+      connectionId: z.string().describe('Connection identifier'),
+      table: z.string().describe('Table or collection name'),
+      where: z.record(z.any()).describe('Filter conditions (required for safety)'),
+    }, async (args) => this.handleDbDelete(args));
+
+    this.server.tool('db_raw_query', 'Execute raw SQL with parameter binding (SQL databases only)', {
+      connectionId: z.string().describe('Connection identifier'),
+      query: z.string().describe('SQL query with $1, $2 placeholders'),
+      params: z.array(z.any()).optional().describe('Query parameters'),
+    }, async (args) => this.handleDbRawQuery(args));
+
+    this.server.tool('db_aggregate', 'Execute MongoDB aggregation pipeline (MongoDB only)', {
+      connectionId: z.string().describe('Connection identifier'),
+      collection: z.string().describe('Collection name'),
+      pipeline: z.array(z.record(z.any())).describe('Aggregation pipeline stages'),
+    }, async (args) => this.handleDbAggregate(args));
+
+    this.server.tool('db_disconnect', 'Disconnect and close a database connection', {
+      connectionId: z.string().describe('Connection identifier'),
+    }, async (args) => this.handleDbDisconnect(args));
+
+    this.server.tool('db_transaction', 'Execute multiple operations in an ACID transaction with automatic deadlock retry', {
+      connectionId: z.string().describe('Connection identifier'),
+      operations: z.array(z.object({
+        type: z.enum(['insert', 'update', 'delete', 'query']).describe('Operation type'),
+        table: z.string().describe('Table or collection name'),
+        data: z.record(z.any()).optional().describe('Data for insert/update'),
+        where: z.record(z.any()).optional().describe('Filter for update/delete/query'),
+        select: z.array(z.string()).optional().describe('Columns to select (query only)'),
+        limit: z.number().optional().describe('Limit results (query only)'),
+      })).describe('Operations to execute in transaction'),
+      maxRetries: z.number().optional().describe('Max retries on deadlock (default: 3)'),
+      timeout: z.number().optional().describe('Transaction timeout ms (default: 30000)'),
+    }, async (args) => this.handleDbTransaction(args));
 
     logger.info('All tools registered');
   }
@@ -1123,6 +1378,357 @@ export class OktyvServer {
   }
 
   // ============================================================================
+  // Handler Methods — Indeed Connector
+  // ============================================================================
+
+  private async handleIndeedSearchJobs(args: any): Promise<any> {
+    try {
+      logger.info('Handling indeed_search_jobs', { args });
+      const params = { keywords: args.keywords, location: args.location, remote: args.remote, limit: args.limit || 10 };
+      const jobs = await this.indeedConnector.searchJobs(params);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { jobs, totalCount: jobs.length, platform: 'INDEED' } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('indeed_search_jobs failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message, retryable: error.retryable !== false } }, null, 2) }] };
+    }
+  }
+
+  private async handleIndeedGetJob(args: any): Promise<any> {
+    try {
+      logger.info('Handling indeed_get_job', { jobKey: args.jobKey });
+      const result = await this.indeedConnector.getJob(args.jobKey, args.includeCompany || false);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('indeed_get_job failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message, retryable: error.retryable !== false } }, null, 2) }] };
+    }
+  }
+
+  private async handleIndeedGetCompany(args: any): Promise<any> {
+    try {
+      logger.info('Handling indeed_get_company', { companyId: args.companyId });
+      const result = await this.indeedConnector.getCompany(args.companyId);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('indeed_get_company failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message, retryable: error.retryable !== false } }, null, 2) }] };
+    }
+  }
+
+  // ============================================================================
+  // Handler Methods — Email Engine
+  // ============================================================================
+
+  private async handleEmailSmtpConnect(args: any): Promise<any> {
+    try {
+      logger.info('Handling email_smtp_connect', { connectionId: args.connectionId, host: args.host });
+      await this.emailEngine.smtpConnect({ connectionId: args.connectionId, host: args.host, port: args.port, secure: args.secure, vaultName: args.vaultName, credentialName: args.credentialName, username: args.username, password: args.password });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `SMTP connected: ${args.connectionId}` }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('email_smtp_connect failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleEmailSmtpSend(args: any): Promise<any> {
+    try {
+      logger.info('Handling email_smtp_send', { connectionId: args.connectionId, to: args.to });
+      const messageId = await this.emailEngine.smtpSend(args.connectionId, { from: args.from, to: args.to, subject: args.subject, text: args.text, html: args.html, cc: args.cc, bcc: args.bcc, replyTo: args.replyTo });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { messageId } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('email_smtp_send failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleEmailImapConnect(args: any): Promise<any> {
+    try {
+      logger.info('Handling email_imap_connect', { connectionId: args.connectionId, host: args.host });
+      await this.emailEngine.imapConnect({ connectionId: args.connectionId, host: args.host, port: args.port, secure: args.secure, vaultName: args.vaultName, credentialName: args.credentialName, username: args.username, password: args.password });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `IMAP connected: ${args.connectionId}` }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('email_imap_connect failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleEmailImapFetch(args: any): Promise<any> {
+    try {
+      logger.info('Handling email_imap_fetch', { connectionId: args.connectionId });
+      const emails = await this.emailEngine.imapFetch(args.connectionId, { folder: args.folder, criteria: args.criteria, limit: args.limit, markSeen: args.markSeen });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { emails, count: emails.length } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('email_imap_fetch failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleEmailGmailSend(args: any): Promise<any> {
+    try {
+      logger.info('Handling email_gmail_send', { userId: args.userId });
+      const messageId = await this.emailEngine.gmailSend(args.userId, { to: args.to, subject: args.subject, body: args.body, html: args.html, cc: args.cc, bcc: args.bcc });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { messageId } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('email_gmail_send failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleEmailGmailRead(args: any): Promise<any> {
+    try {
+      logger.info('Handling email_gmail_read', { userId: args.userId });
+      const result = await this.emailEngine.gmailList(args.userId, { query: args.query, maxResults: args.maxResults });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('email_gmail_read failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleEmailGmailSearch(args: any): Promise<any> {
+    try {
+      logger.info('Handling email_gmail_search', { userId: args.userId, query: args.query });
+      const result = await this.emailEngine.gmailSearch(args.userId, args.query, args.maxResults);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('email_gmail_search failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleEmailParse(args: any): Promise<any> {
+    try {
+      logger.info('Handling email_parse');
+      const result = await this.emailEngine.parseEmail(args.raw, { extractAttachments: args.includeAttachments, maxAttachmentSize: args.maxAttachmentSize });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('email_parse failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  // ============================================================================
+  // Handler Methods — Cron Engine
+  // ============================================================================
+
+  private async handleCronCreateTask(args: any): Promise<any> {
+    try {
+      logger.info('Handling cron_create_task', { name: args.name });
+      const task = this.cronEngine.createTask({ name: args.name, description: args.description, schedule: { type: args.scheduleType, expression: args.cronExpression, interval: args.interval, executeAt: args.executeAt ? new Date(args.executeAt) : undefined }, action: { type: args.actionType, config: args.actionConfig || {} }, options: { timezone: args.timezone, retryCount: args.retryCount, timeout: args.timeout, enabled: args.enabled } });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: task }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('cron_create_task failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleCronListTasks(args: any): Promise<any> {
+    try {
+      logger.info('Handling cron_list_tasks');
+      const tasks = this.cronEngine.taskManager.listTasks({ enabled: args.enabled, scheduleType: args.scheduleType, limit: args.limit });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { tasks, count: tasks.length } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('cron_list_tasks failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleCronGetTask(args: any): Promise<any> {
+    try {
+      const task = this.cronEngine.taskManager.getTask(args.taskId);
+      if (!task) return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { message: `Task not found: ${args.taskId}` } }, null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: task }, null, 2) }] };
+    } catch (error: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleCronEnableTask(args: any): Promise<any> {
+    try {
+      this.cronEngine.enableTask(args.taskId);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Task ${args.taskId} enabled` }, null, 2) }] };
+    } catch (error: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleCronDisableTask(args: any): Promise<any> {
+    try {
+      this.cronEngine.disableTask(args.taskId);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Task ${args.taskId} disabled` }, null, 2) }] };
+    } catch (error: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleCronDeleteTask(args: any): Promise<any> {
+    try {
+      this.cronEngine.deleteTask(args.taskId);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Task ${args.taskId} deleted` }, null, 2) }] };
+    } catch (error: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleCronExecuteNow(args: any): Promise<any> {
+    try {
+      await this.cronEngine.executeNow(args.taskId);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Task ${args.taskId} executed` }, null, 2) }] };
+    } catch (error: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleCronUpdateTask(args: any): Promise<any> {
+    try {
+      const task = this.cronEngine.updateTask(args.taskId, { name: args.name, schedule: { type: args.scheduleType || 'cron', expression: args.cronExpression, interval: args.interval }, action: args.actionConfig ? { type: args.actionType || 'http', config: args.actionConfig } : undefined, options: { timezone: args.timezone, timeout: args.timeout } });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: task }, null, 2) }] };
+    } catch (error: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleCronGetHistory(args: any): Promise<any> {
+    try {
+      const history = this.cronEngine.history.getHistory(args.taskId, args.limit);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { history, count: history.length } }, null, 2) }] };
+    } catch (error: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleCronGetStatistics(args: any): Promise<any> {
+    try {
+      const stats = this.cronEngine.history.getStatistics(args.taskId);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: stats }, null, 2) }] };
+    } catch (error: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleCronClearHistory(args: any): Promise<any> {
+    try {
+      this.cronEngine.history.clearHistory(args.taskId);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `History cleared for task ${args.taskId}` }, null, 2) }] };
+    } catch (error: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleCronValidateExpression(args: any): Promise<any> {
+    try {
+      const valid = this.cronEngine.scheduler.validate(args.expression);
+      const nextRun = valid ? this.cronEngine.scheduler.getNextRun(args.expression, args.timezone) : null;
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { valid, nextRun, expression: args.expression } }, null, 2) }] };
+    } catch (error: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  // ============================================================================
+  // Handler Methods — Database Engine
+  // ============================================================================
+
+  private async handleDbConnect(args: any): Promise<any> {
+    try {
+      logger.info('Handling db_connect', { connectionId: args.connectionId, type: args.type });
+      await this.databaseEngine.connect({ connectionId: args.connectionId, type: args.type, vaultName: args.vaultName, credentialName: args.credentialName, connectionString: args.connectionString, poolSize: args.poolSize });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Connected: ${args.connectionId} (${args.type})` }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('db_connect failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleDbQuery(args: any): Promise<any> {
+    try {
+      logger.info('Handling db_query', { connectionId: args.connectionId, table: args.table });
+      const results = await this.databaseEngine.query(args.connectionId, args.table, { where: args.where, select: args.select, orderBy: args.orderBy, limit: args.limit, offset: args.offset });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { rows: results, count: results.length } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('db_query failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleDbInsert(args: any): Promise<any> {
+    try {
+      logger.info('Handling db_insert', { connectionId: args.connectionId, table: args.table });
+      const result = await this.databaseEngine.insert(args.connectionId, args.table, { data: args.data });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('db_insert failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleDbUpdate(args: any): Promise<any> {
+    try {
+      logger.info('Handling db_update', { connectionId: args.connectionId, table: args.table });
+      const count = await this.databaseEngine.update(args.connectionId, args.table, { where: args.where, data: args.data });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { updatedCount: count } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('db_update failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleDbDelete(args: any): Promise<any> {
+    try {
+      logger.info('Handling db_delete', { connectionId: args.connectionId, table: args.table });
+      const count = await this.databaseEngine.delete(args.connectionId, args.table, { where: args.where });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { deletedCount: count } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('db_delete failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleDbRawQuery(args: any): Promise<any> {
+    try {
+      logger.info('Handling db_raw_query', { connectionId: args.connectionId });
+      const result = await this.databaseEngine.rawQuery(args.connectionId, args.query, args.params || []);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('db_raw_query failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleDbAggregate(args: any): Promise<any> {
+    try {
+      logger.info('Handling db_aggregate', { connectionId: args.connectionId, collection: args.collection });
+      const result = await this.databaseEngine.aggregate(args.connectionId, args.collection, args.pipeline);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { rows: result, count: result.length } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('db_aggregate failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleDbDisconnect(args: any): Promise<any> {
+    try {
+      logger.info('Handling db_disconnect', { connectionId: args.connectionId });
+      await this.databaseEngine.disconnect(args.connectionId);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Disconnected: ${args.connectionId}` }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('db_disconnect failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  private async handleDbTransaction(args: any): Promise<any> {
+    try {
+      logger.info('Handling db_transaction', { connectionId: args.connectionId, operations: args.operations?.length });
+      const result = await this.databaseEngine.transaction(args.connectionId, args.operations, { maxRetries: args.maxRetries, timeout: args.timeout });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('db_transaction failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.UNKNOWN_ERROR, message: error.message } }, null, 2) }] };
+    }
+  }
+
+  // ============================================================================
   // Tool Registry for Parallel Execution Engine
   // ============================================================================
 
@@ -1179,6 +1785,38 @@ export class OktyvServer {
     registry.set('api_oauth_init', wrapHandler(this.handleApiOAuthInit));
     registry.set('api_oauth_callback', wrapHandler(this.handleApiOAuthCallback));
     registry.set('api_oauth_refresh', wrapHandler(this.handleApiOAuthRefresh));
+    registry.set('indeed_search_jobs', wrapHandler(this.handleIndeedSearchJobs));
+    registry.set('indeed_get_job', wrapHandler(this.handleIndeedGetJob));
+    registry.set('indeed_get_company', wrapHandler(this.handleIndeedGetCompany));
+    registry.set('email_smtp_connect', wrapHandler(this.handleEmailSmtpConnect));
+    registry.set('email_smtp_send', wrapHandler(this.handleEmailSmtpSend));
+    registry.set('email_imap_connect', wrapHandler(this.handleEmailImapConnect));
+    registry.set('email_imap_fetch', wrapHandler(this.handleEmailImapFetch));
+    registry.set('email_gmail_send', wrapHandler(this.handleEmailGmailSend));
+    registry.set('email_gmail_read', wrapHandler(this.handleEmailGmailRead));
+    registry.set('email_gmail_search', wrapHandler(this.handleEmailGmailSearch));
+    registry.set('email_parse', wrapHandler(this.handleEmailParse));
+    registry.set('cron_create_task', wrapHandler(this.handleCronCreateTask));
+    registry.set('cron_list_tasks', wrapHandler(this.handleCronListTasks));
+    registry.set('cron_get_task', wrapHandler(this.handleCronGetTask));
+    registry.set('cron_enable_task', wrapHandler(this.handleCronEnableTask));
+    registry.set('cron_disable_task', wrapHandler(this.handleCronDisableTask));
+    registry.set('cron_delete_task', wrapHandler(this.handleCronDeleteTask));
+    registry.set('cron_execute_now', wrapHandler(this.handleCronExecuteNow));
+    registry.set('cron_update_task', wrapHandler(this.handleCronUpdateTask));
+    registry.set('cron_get_history', wrapHandler(this.handleCronGetHistory));
+    registry.set('cron_get_statistics', wrapHandler(this.handleCronGetStatistics));
+    registry.set('cron_clear_history', wrapHandler(this.handleCronClearHistory));
+    registry.set('cron_validate_expression', wrapHandler(this.handleCronValidateExpression));
+    registry.set('db_connect', wrapHandler(this.handleDbConnect));
+    registry.set('db_query', wrapHandler(this.handleDbQuery));
+    registry.set('db_insert', wrapHandler(this.handleDbInsert));
+    registry.set('db_update', wrapHandler(this.handleDbUpdate));
+    registry.set('db_delete', wrapHandler(this.handleDbDelete));
+    registry.set('db_raw_query', wrapHandler(this.handleDbRawQuery));
+    registry.set('db_aggregate', wrapHandler(this.handleDbAggregate));
+    registry.set('db_disconnect', wrapHandler(this.handleDbDisconnect));
+    registry.set('db_transaction', wrapHandler(this.handleDbTransaction));
 
     logger.info('Tool registry populated for parallel execution', { toolCount: registry.size });
   }
