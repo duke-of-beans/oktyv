@@ -1,1 +1,1 @@
-docs: STATUS.md updated for v1.5.0 API engine
+docs: README rewrite for v1.5.0 — full tool reference, all 37 tools, all 10 engines
