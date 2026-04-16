@@ -9,6 +9,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { fileURLToPath } from 'url';
+import path from 'path';
 import { createLogger } from './utils/logger.js';
 import { BrowserSessionManager } from './browser/session.js';
 import { RateLimiter } from './browser/rate-limiter.js';
@@ -83,8 +85,11 @@ export class OktyvServer {
       (url: string, options?: any) => this.apiEngine.request(url, options)
     );
 
-    // Initialize cron engine
-    this.cronEngine = new CronEngine();
+    // Initialize cron engine — explicit data path so it works regardless of cwd
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const cronDbPath = path.join(__dirname, '..', 'data', 'cron.db');
+    this.cronEngine = new CronEngine(cronDbPath);
 
     // Initialize database engine
     this.databaseEngine = new DatabaseEngine(
