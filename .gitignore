@@ -1,46 +1,38 @@
-# Node
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Build output
 dist/
-*.tsbuildinfo
-
-# Browser data (persistent sessions)
-browser-data/
-.puppeteer/
-
-# Environment
-.env
-.env.local
-.env.*.local
-
-# Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Test
 coverage/
-.vitest/
-
-# Logs
 logs/
-*.log
-
-# Temporary
-tmp/
-temp/
-
-# Visual inspection temp screenshots — always auto-cleaned, never committed
-screenshots/
 browser-data/
-_audit-report.json
+browser-data /
+screenshots/
+*.js.map
+*.d.ts
+!src/**/*.d.ts
+.DS_Store
+
+# Session artifacts
+PROJECT_DNA.json
+PROJECT_STATE.json
+STATUS.md
+_mcp-health-report.json
+MORNING_BRIEFING.md
+commit-msg.txt
+SESSION_SUMMARY.md
+CONTINUATION_PROMPT*.md
+IMPLEMENTATION_HANDOFF.md
+SCOPE_AGREEMENT.md
+ACHIEVEMENT_SUMMARY.md
+CI_FIX_GLOB_PATTERNS.md
+CI_SUCCESS_SUMMARY.md
+GITHUB_ACTIONS_TROUBLESHOOTING.md
+TEST_INFRASTRUCTURE_FINAL_REPORT.md
+PRODUCTION_READY_v1.0.0.md
+RELEASE_NOTES_v1.0.0-beta.1.md
+INTEGRATION_STATUS.md
+BACKLOG.md
+VISION.md
+TESTING.md
+CLI_USAGE.md
+_screenshot.cjs
+vitest.config.ts.bak
+cleanup.bat

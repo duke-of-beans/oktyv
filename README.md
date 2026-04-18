@@ -4,7 +4,7 @@ Universal automation execution layer for AI agents.
 
 **Version:** 1.6.0 | **Status:** Production | **Tools:** 69 | **Engines:** 10
 
-> GREGORE orchestrates. Oktyv executes.
+> Give your AI agent hands. Oktyv executes.
 
 Oktyv is a Model Context Protocol (MCP) server that gives Claude the ability to take real action in the world. Ten specialized engines cover authenticated API calls, browser automation, visual QA, shell execution, file operations, encrypted credential storage, OAuth flows, job board scraping, scheduled tasks, and parallel/concurrent execution with dependency management.
 
@@ -255,10 +255,10 @@ Add to `claude_desktop_config.json`:
   "mcpServers": {
     "oktyv": {
       "command": "node",
-      "args": ["D:/Dev/oktyv/dist/server.js"],
+      "args": ["/path/to/oktyv/dist/server.js"],
       "env": {
-        "OKTYV_BROWSER_DATA_DIR": "D:/Dev/oktyv/browser-data",
-        "PUPPETEER_CACHE_DIR": "D:/Cache/puppeteer"
+        "OKTYV_BROWSER_DATA_DIR": "/path/to/oktyv/browser-data",
+        "PUPPETEER_CACHE_DIR": "/path/to/cache/puppeteer"
       }
     }
   }
