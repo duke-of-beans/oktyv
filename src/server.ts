@@ -26,6 +26,7 @@ import { EmailEngine } from './tools/email/EmailEngine.js';
 import { CronEngine } from './tools/cron/CronEngine.js';
 import { DatabaseEngine } from './tools/database/DatabaseEngine.js';
 import { IndeedConnector } from './connectors/indeed.js';
+import { UpworkConnector } from './connectors/upwork.js';
 import { ParallelExecutionEngine } from './engines/parallel/ParallelExecutionEngine.js';
 import { ShellEngine } from './engines/shell/ShellEngine.js';
 import { VisualInspectionConnector } from './connectors/visual-inspection.js';
@@ -48,6 +49,7 @@ export class OktyvServer {
   private cronEngine: CronEngine;
   private databaseEngine: DatabaseEngine;
   private indeedConnector: IndeedConnector;
+  private upworkConnector: UpworkConnector;
   private parallelEngine: ParallelExecutionEngine;
   private shellEngine: ShellEngine;
 
@@ -98,6 +100,9 @@ export class OktyvServer {
 
     // Initialize Indeed connector
     this.indeedConnector = new IndeedConnector(this.sessionManager, this.rateLimiter);
+
+    // Initialize Upwork connector
+    this.upworkConnector = new UpworkConnector(this.sessionManager, this.rateLimiter);
 
     // Initialize file infrastructure
     this.fileEngine = new FileEngine();
@@ -815,6 +820,33 @@ export class OktyvServer {
       timeout: z.number().optional().describe('Transaction timeout ms (default: 30000)'),
     }, async (args) => this.handleDbTransaction(args));
 
+
+    // -- Upwork Connector -------------------------------------------------------
+
+    this.server.tool('upwork_search_jobs', 'Search for freelance jobs on Upwork with keyword, rate, contractor tier, and client-quality filters', {
+      keywords: z.string().optional().describe('Job title, skills, or keywords'),
+      limit: z.number().min(1).max(50).optional().describe('Maximum results (default: 20)'),
+      upworkHourlyMin: z.number().optional().describe('Minimum hourly rate in USD'),
+      upworkHourlyMax: z.number().optional().describe('Maximum hourly rate in USD'),
+      upworkFixedMin: z.number().optional().describe('Minimum fixed-price budget in USD'),
+      upworkExperienceLevel: z.enum(['entry','intermediate','expert']).optional().describe('Upwork contractor tier'),
+      upworkProjectLength: z.enum(['short','medium','long','ongoing']).optional().describe('Project duration filter'),
+      upworkPaymentVerifiedOnly: z.boolean().optional().describe('Only return jobs from payment-verified clients'),
+    }, async (args) => this.handleUpworkSearchJobs(args));
+
+    this.server.tool('upwork_get_job', 'Get full Upwork job detail including bid range (Plus users), proposals count, client history, connects required', {
+      jobId: z.string().describe('Upwork job ID (the ~022... fragment from the URL)'),
+      includeClient: z.boolean().optional().describe('Also fetch client profile if a client link is present (default: false)'),
+    }, async (args) => this.handleUpworkGetJob(args));
+
+    this.server.tool('upwork_get_client', 'Get Upwork client (buyer) profile — total spent, hire rate, jobs posted, rating', {
+      clientId: z.string().describe('Upwork client ID from the client URL'),
+    }, async (args) => this.handleUpworkGetClient(args));
+
+    this.server.tool('upwork_login_capture', 'One-time Upwork authentication. Opens a browser window, waits for manual login (handles 2FA/device verification), captures session cookies to JSON for reuse. Run once per ~2-3 weeks when the session expires. Other upwork_* tools depend on this having been run.', {
+      timeoutMinutes: z.number().optional().describe('Max minutes to wait for login completion (default: 5)'),
+    }, async (args) => this.handleUpworkLoginCapture(args));
+
     logger.info('All tools registered');
   }
 
@@ -1417,6 +1449,78 @@ export class OktyvServer {
     } catch (error: any) {
       logger.error('indeed_get_company failed', { error });
       return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message, retryable: error.retryable !== false } }, null, 2) }] };
+    }
+  }
+
+
+  // ============================================================================
+  // Handler Methods — Upwork
+  // ============================================================================
+
+  private async handleUpworkSearchJobs(args: any): Promise<any> {
+    try {
+      logger.info('Handling upwork_search_jobs', { args });
+      const params: JobSearchParams = {
+        keywords: args.keywords,
+        limit: args.limit || 20,
+        offset: args.offset || 0,
+        upworkHourlyMin: args.upworkHourlyMin,
+        upworkHourlyMax: args.upworkHourlyMax,
+        upworkFixedMin: args.upworkFixedMin,
+        upworkExperienceLevel: args.upworkExperienceLevel,
+        upworkProjectLength: args.upworkProjectLength,
+        upworkContractorTier: args.upworkContractorTier,
+        upworkMinClientSpent: args.upworkMinClientSpent,
+        upworkPaymentVerifiedOnly: args.upworkPaymentVerifiedOnly,
+      };
+      const jobs = await this.upworkConnector.searchJobs(params);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { jobs, totalCount: jobs.length, hasMore: jobs.length >= (params.limit || 20), nextOffset: (params.offset || 0) + jobs.length, query: params, searchedAt: new Date(), platform: 'UPWORK' } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('Upwork job search failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'An unknown error occurred', retryable: error.retryable !== false } }, null, 2) }] };
+    }
+  }
+
+  private async handleUpworkGetJob(args: any): Promise<any> {
+    try {
+      logger.info('Handling upwork_get_job', { args });
+      const { jobId, includeClient = false } = args;
+      if (!jobId) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.INVALID_PARAMETERS, message: 'jobId is required', retryable: false } }, null, 2) }] };
+      }
+      const result = await this.upworkConnector.getJob(jobId, includeClient);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('Upwork job fetch failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'An unknown error occurred', retryable: error.retryable !== false } }, null, 2) }] };
+    }
+  }
+
+  private async handleUpworkGetClient(args: any): Promise<any> {
+    try {
+      logger.info('Handling upwork_get_client', { args });
+      const { clientId } = args;
+      if (!clientId) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: OktyvErrorCode.INVALID_PARAMETERS, message: 'clientId is required', retryable: false } }, null, 2) }] };
+      }
+      const client = await this.upworkConnector.getClient(clientId);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: client }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('Upwork client fetch failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'An unknown error occurred', retryable: error.retryable !== false } }, null, 2) }] };
+    }
+  }
+
+  private async handleUpworkLoginCapture(args: any): Promise<any> {
+    try {
+      logger.info('Handling upwork_login_capture', { args });
+      const timeoutMinutes = args?.timeoutMinutes ?? 5;
+      const timeoutMs = timeoutMinutes * 60 * 1000;
+      const result = await this.upworkConnector.captureLogin(timeoutMs);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, result: { ...result, nextSteps: 'Auth saved. Other upwork_* tools will now work. Re-run this tool when the session expires (~2-3 weeks).' } }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('Upwork login capture failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || OktyvErrorCode.UNKNOWN_ERROR, message: error.message || 'An unknown error occurred', retryable: error.retryable !== false } }, null, 2) }] };
     }
   }
 

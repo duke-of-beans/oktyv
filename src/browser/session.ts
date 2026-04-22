@@ -5,7 +5,24 @@
  * login detection, and graceful cleanup.
  */
 
-import puppeteer from 'puppeteer';
+// @ts-ignore — puppeteer-extra ships its own types but CJS/ESM interop is fussy
+import puppeteerExtra from 'puppeteer-extra';
+// @ts-ignore — same reason
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import vanillaPuppeteer from 'puppeteer';
+
+// Register stealth plugin on the extra wrapper. This patches navigator.webdriver,
+// canvas fingerprint, WebGL vendor, chrome.runtime, and 15+ other automation tells
+// that Cloudflare reads. ONLY applied to bundled Chromium. Real Chrome is real —
+// stealth patches there cause more problems than they solve (breaks Chrome's own
+// session restore by making the runtime look tampered with).
+puppeteerExtra.use(StealthPlugin());
+
+// Pick the right puppeteer at launch time based on whether we're using real Chrome.
+// Bundled Chromium → stealth-wrapped puppeteer. Real Chrome → vanilla puppeteer.
+function getPuppeteer(useRealChrome: boolean): typeof vanillaPuppeteer {
+  return (useRealChrome ? vanillaPuppeteer : (puppeteerExtra as any)) as typeof vanillaPuppeteer;
+}
 import { mkdir } from 'fs/promises';
 import { join } from 'path';
 import { createLogger } from '../utils/logger.js';
@@ -91,23 +108,44 @@ export class BrowserSessionManager {
 
       logger.debug('Launching browser', { platform, config: finalConfig });
 
-      // Resolve Chrome executable path from env or default Puppeteer cache
+      // Resolve Chrome executable path.
+      // Priority: OKTYV_CHROME_EXECUTABLE env var > PUPPETEER_CACHE_DIR > bundled Chromium.
+      // Setting OKTYV_CHROME_EXECUTABLE to a real Chrome install bypasses Cloudflare
+      // fingerprinting that flags Puppeteer's bundled Chromium. Pair with a dedicated
+      // user profile (OKTYV_BROWSER_DATA_DIR) logged in once manually.
+      const explicitChrome = process.env.OKTYV_CHROME_EXECUTABLE;
       const cacheDir = process.env.PUPPETEER_CACHE_DIR || process.env.npm_config_cache || '';
-      const executablePath = cacheDir
-        ? `${cacheDir}/chrome/win64-131.0.6778.204/chrome-win64/chrome.exe`
-        : undefined;
+      const executablePath = explicitChrome
+        || (cacheDir ? `${cacheDir}/chrome/win64-131.0.6778.204/chrome-win64/chrome.exe` : undefined);
 
-      // Launch browser
+      // Launch args and stealth level differ based on browser binary.
+      // Real Chrome: ZERO bypass flags. Any flag that triggers the "unsupported command-line
+      //   flag" banner makes Chrome treat the session as suspicious and skip auth state
+      //   restoration. Just strip the --enable-automation default; that's it.
+      // Bundled Chromium: needs the full bypass flag set because it's a sandboxed Puppeteer
+      //   build with automation telemetry Cloudflare fingerprints.
+      const usingRealChrome = Boolean(explicitChrome);
+      const launchArgs = usingRealChrome
+        ? []
+        : [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-blink-features=AutomationControlled',
+            '--exclude-switches=enable-automation',
+            '--disable-features=IsolateOrigins,site-per-process',
+          ];
+
+      // Launch browser — pick vanilla puppeteer when using real Chrome (no stealth),
+      // stealth-wrapped puppeteer when using bundled Chromium.
+      const puppeteer = getPuppeteer(usingRealChrome);
       const browser = await puppeteer.launch({
         headless: finalConfig.headless,
         userDataDir,
         ...(executablePath ? { executablePath } : {}),
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-blink-features=AutomationControlled',
-        ],
+        // Strip Puppeteer's default automation flags that Cloudflare fingerprints
+        ignoreDefaultArgs: ['--enable-automation'],
+        args: launchArgs,
         ...finalConfig.launchOptions,
       });
 
@@ -115,15 +153,28 @@ export class BrowserSessionManager {
       const pages = await browser.pages();
       const page = pages[0] || await browser.newPage();
 
+      // Strip navigator.webdriver — only needed for bundled Chromium. Real Chrome
+      // doesn't set it to true in normal user-data-dir launches, so skip the patch
+      // there to avoid tampering with a session Chrome already considers real.
+      if (!usingRealChrome) {
+        await page.evaluateOnNewDocument(() => {
+          Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        });
+      }
+
       // Set viewport
       if (finalConfig.viewport) {
         await page.setViewport(finalConfig.viewport);
       }
 
-      // Set user agent to avoid detection
-      await page.setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      );
+      // Set user agent to avoid detection — but ONLY when using bundled Chromium.
+      // Real Chrome advertises a true, current UA; overriding it with a stale "Chrome/120"
+      // is a fingerprint mismatch Cloudflare can flag. Let real Chrome be real.
+      if (!usingRealChrome) {
+        await page.setUserAgent(
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        );
+      }
 
       // Create session object
       const session: BrowserSession = {

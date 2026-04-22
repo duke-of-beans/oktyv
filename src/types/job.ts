@@ -37,6 +37,7 @@ export enum Platform {
   LINKEDIN = 'LINKEDIN',
   INDEED = 'INDEED',
   WELLFOUND = 'WELLFOUND',
+  UPWORK = 'UPWORK',
   GENERIC = 'GENERIC',
   VANGST = 'VANGST',
   DICE = 'DICE',
@@ -100,6 +101,34 @@ export interface Job {
   requirements?: string[];
   benefits?: string[];
   
+  // Platform-specific extensions (optional, used by Upwork and similar)
+  upworkMeta?: {
+    proposalsRange?: string;       // e.g. "20 to 50"
+    connectsRequired?: number;     // e.g. 12
+    bidRangeLow?: number;          // $ figure
+    bidRangeAvg?: number;          // $ figure
+    bidRangeHigh?: number;         // $ figure
+    clientSpent?: string;          // e.g. "$10K+ spent"
+    clientHireRate?: string;       // e.g. "17% hire rate"
+    clientJobsPosted?: number;
+    clientRating?: number;         // 0-5
+    clientReviewCount?: number;
+    clientCountry?: string;
+    paymentVerified?: boolean;
+    phoneVerified?: boolean;
+    projectType?: string;          // "Ongoing project" / "One-time project"
+    hoursPerWeek?: string;         // "Less than 30 hrs/week"
+    duration?: string;             // "1-3 months"
+    upworkExperienceLevel?: string; // "Entry/Intermediate/Expert"
+    // Client activity (from job detail page)
+    clientInterviewing?: number;
+    clientInvitesSent?: number;
+    clientLastViewed?: string;
+    clientMemberSince?: string;
+    clientTotalHires?: number;
+    clientActiveHires?: number;
+  };
+  
   // Original Data
   raw?: unknown;                 // Original platform response (for debugging)
 }
@@ -114,6 +143,15 @@ export interface JobSearchParams {
   postedWithin?: '24h' | '7d' | '30d';  // Relative time filters
   limit?: number;
   offset?: number;
+  // Upwork-specific
+  upworkHourlyMin?: number;
+  upworkHourlyMax?: number;
+  upworkFixedMin?: number;
+  upworkExperienceLevel?: 'entry' | 'intermediate' | 'expert';
+  upworkProjectLength?: 'short' | 'medium' | 'long' | 'ongoing';
+  upworkContractorTier?: 1 | 2 | 3;  // 1=entry, 2=intermediate, 3=expert
+  upworkMinClientSpent?: number;
+  upworkPaymentVerifiedOnly?: boolean;
 }
 
 export interface JobSearchResult {

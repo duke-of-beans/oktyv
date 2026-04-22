@@ -4,6 +4,7 @@ coverage/
 logs/
 browser-data/
 browser-data /
+browser-data-chrome/
 screenshots/
 *.js.map
 *.d.ts
@@ -36,3 +37,7 @@ CLI_USAGE.md
 _screenshot.cjs
 vitest.config.ts.bak
 cleanup.bat
+
+# Saved auth cookies — never commit
+auth/
+
