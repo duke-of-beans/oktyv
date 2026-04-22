@@ -2,7 +2,7 @@
 
 Universal automation execution layer for AI agents.
 
-**Version:** 1.6.0 | **Status:** Production | **Tools:** 69 | **Engines:** 10
+**Version:** 1.7.0 | **Status:** Production | **Tools:** 73 | **Engines:** 10
 
 > Give your AI agent hands. Oktyv executes.
 
@@ -28,6 +28,7 @@ Oktyv is a Model Context Protocol (MCP) server that gives Claude the ability to 
 | **LinkedIn** | `linkedin_search_jobs` `linkedin_get_job` `linkedin_get_company` | Job search and company lookup via LinkedIn |
 | **Wellfound** | `wellfound_search_jobs` `wellfound_get_job` `wellfound_get_company` | Startup-focused job board (formerly AngelList Talent) |
 | **Indeed** | `indeed_search_jobs` `indeed_get_job` `indeed_get_company` | Job search and company lookup via Indeed |
+| **Upwork** | `upwork_search_jobs` `upwork_get_job` `upwork_get_client` `upwork_login_capture` | Freelance job board with Cloudflare bypass via `puppeteer-real-browser` |
 
 ---
 
@@ -213,6 +214,19 @@ Any Oktyv tool can be composed into a parallel batch. The DAG engine resolves de
 - `wellfound_get_job` — Get job details by Wellfound slug
 - `wellfound_get_company` — Get company profile including funding info by slug
 
+**Indeed**
+- `indeed_search_jobs` — Search by keywords, location, remote flag, limit
+- `indeed_get_job` — Get full job details by Indeed job key
+- `indeed_get_company` — Get company profile by Indeed employer ID
+
+**Upwork** (freelance platform with aggressive Cloudflare protection)
+- `upwork_search_jobs` — Search by keywords, hourly/fixed range, experience level, project length, payment-verified filter (max 50)
+- `upwork_get_job` — Full job detail including bid range (for Freelancer Plus users), proposal count, client quality signals, `includeClient` option
+- `upwork_get_client` — Client profile: total spent, hire rate, jobs posted, rating, member-since
+- `upwork_login_capture` — One-time authentication: opens a browser window, polls for `master_refresh_token` + `console_user` cookies, saves to JSON. Re-run every ~2-3 weeks when the session expires. Only needed for authenticated-only fields; public job/client pages work without it.
+
+Upwork uses an **isolated session manager** (`puppeteer-real-browser`) to defeat Cloudflare's v20-era Turnstile challenges, which vanilla Puppeteer + stealth plugins cannot bypass on Chrome 127+. See `STATUS_UPWORK_ADAPTER.md` for architecture details.
+
 ---
 
 ## Decision Matrix — Which Tool to Use
@@ -223,6 +237,7 @@ Any Oktyv tool can be composed into a parallel batch. The DAG engine resolves de
 | OAuth flow for Zoho / Google / GitHub / Slack | `api_oauth_init` → user visits URL → `api_oauth_callback` |
 | Run npm install + tsc + git status simultaneously | `shell_batch` with `dependsOn` for sequenced steps |
 | Scrape LinkedIn + Wellfound simultaneously | `parallel_execute` with both job search tools |
+| Freelance gig triage on Upwork | `upwork_search_jobs` + `upwork_get_job` (Cloudflare handled automatically) |
 | Visual audit of 10 URLs in parallel | `browser_batch_audit` |
 | Verify fonts/colors fleet-wide | `browser_computed_styles` |
 | Store an API key securely | `vault_set` |
@@ -293,12 +308,16 @@ Claude
               ├── VisualInspectionConnector — scroll/selector/styles/batch capture
               ├── GenericBrowserConnector   — navigate, click, extract, screenshot
               ├── LinkedInConnector      — job search, company lookup
-              └── WellfoundConnector     — startup job board
+              ├── WellfoundConnector     — startup job board
+              ├── IndeedConnector        — job search, company lookup
+              └── UpworkConnector        — freelance platform (isolated puppeteer-real-browser session)
 ```
 
 **Multi-tenant ready.** Each engine is self-contained. The parallel engine's tool registry contains all other engines — any tool can be composed into a parallel batch.
 
 **Vault-first design.** `api_request` reads credentials from the vault by name and injects them as Authorization headers. Secrets never appear in prompts or logs.
+
+**Isolated session for hostile platforms.** Upwork's Cloudflare Turnstile enforcement and Chrome 127+ App-Bound Encryption (v20) made the shared `BrowserSessionManager` insufficient. `UpworkConnector` runs its own `puppeteer-real-browser` session — other connectors are unaffected.
 
 ---
 
@@ -306,6 +325,7 @@ Claude
 
 | Version | Date | Changes |
 |---|---|---|
+| **1.7.0** | 2026-04-21 | **Upwork adapter** — `upwork_search_jobs`, `upwork_get_job`, `upwork_get_client`, `upwork_login_capture` (69→73 tools). Isolated `puppeteer-real-browser` session defeats Cloudflare Turnstile. Platform-agnostic cookie-JSON auth persistence (`src/browser/auth.ts`) for future authenticated-only endpoints. Chrome 146-compatible — replaces profile-dir persistence that broke on App-Bound Encryption (v20). |
 | **1.6.0** | 2026-04-16 | Email (8), Cron (12), Database (9), Indeed (3) engines wired as MCP tools — 37→69 total tools. Indeed connector bug fixes. |
 | **1.5.0** | 2026-04-16 | API Engine MCP tools — `api_request`, `api_oauth_init`, `api_oauth_callback`, `api_oauth_refresh`. Zoho added as OAuth provider. Vault-backed auth for any API. |
 | **1.4.0** | 2026-04-11 | Shell Engine — `shell_batch`, concurrent child processes, DAG deps, powershell/cmd/bash/sh |
@@ -321,7 +341,7 @@ Claude
 
 ```
 src/
-  server.ts                              — MCP server, all 37 tool registrations
+  server.ts                              — MCP server, all 73 tool registrations
   engines/
     shell/ShellEngine.ts                 — shell_batch implementation
     parallel/ParallelExecutionEngine.ts  — parallel_execute + tool registry
@@ -332,16 +352,25 @@ src/
       HttpClient.ts                      — retry, circuit breaker
     vault/VaultEngine.ts                 — AES-256-GCM credential storage
     file/FileEngine.ts                   — local file + archive ops
-  browser/session.ts                     — Puppeteer session management
+  browser/
+    session.ts                           — shared Puppeteer session manager (LinkedIn/Wellfound/Indeed)
+    upwork-real-browser.ts               — isolated puppeteer-real-browser session (Upwork only)
+    auth.ts                              — platform-agnostic cookie-JSON persistence
   connectors/
     linkedin.ts                          — LinkedIn automation
     wellfound.ts                         — Wellfound automation
+    indeed.ts                            — Indeed automation
+    upwork.ts                            — Upwork automation (Cloudflare-bypass via real-browser)
     visual-inspection.ts                 — scroll/selector/styles/batch
     generic.ts                           — navigate, click, extract, screenshot
+scripts/
+  capture-upwork-login.mjs               — standalone Upwork login re-seed utility
+  test-real-browser.mjs                  — smoke test for puppeteer-real-browser
 docs/
   SHELL_ENGINE_DESIGN.md                 — shell_batch spec
   PARALLEL_EXECUTION_DESIGN.md          — parallel_execute spec
   ARCHITECTURE.md                        — full system design
+STATUS_UPWORK_ADAPTER.md                 — Upwork adapter status, architecture, maintenance
 ```
 
 ---
