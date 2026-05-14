@@ -25,7 +25,8 @@
         "${__dirname}/dist/index.js"
       ],
       "env": {
-        "NODE_ENV": "production"
+        "NODE_ENV": "production",
+        "OKTYV_REMOTE_DEBUG_PORT": "9222"
       }
     }
   },

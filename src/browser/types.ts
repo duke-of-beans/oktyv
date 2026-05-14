@@ -65,6 +65,9 @@ export interface BrowserSession {
   
   /** Configuration used */
   config: BrowserSessionConfig;
+
+  /** Whether this session is connected to an external browser via CDP (don't close browser on cleanup) */
+  connectedViaCDP?: boolean;
 }
 
 /**

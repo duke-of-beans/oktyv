@@ -93,6 +93,63 @@ export class BrowserSessionManager {
    */
   private async createSession(config: BrowserSessionConfig): Promise<BrowserSession> {
     const { platform } = config;
+
+    // ── CDP Connection Mode ──────────────────────────────────────────────────
+    // When OKTYV_REMOTE_DEBUG_PORT is set, connect to the user's running browser
+    // instead of launching a new instance. This preserves login sessions, cookies,
+    // and all browser state. The user must launch their browser with:
+    //   --remote-debugging-port=<port>
+    const cdpPort = process.env.OKTYV_REMOTE_DEBUG_PORT;
+    if (cdpPort) {
+      try {
+        logger.info('CDP connection mode — connecting to running browser', { platform, port: cdpPort });
+
+        // Discover WebSocket endpoint from the debug port
+        const versionUrl = `http://127.0.0.1:${cdpPort}/json/version`;
+        const resp = await fetch(versionUrl);
+        if (!resp.ok) throw new Error(`CDP version endpoint returned ${resp.status}`);
+        const versionInfo = await resp.json() as { webSocketDebuggerUrl: string };
+        const wsEndpoint = versionInfo.webSocketDebuggerUrl;
+
+        if (!wsEndpoint) throw new Error('No webSocketDebuggerUrl in CDP version response');
+        logger.debug('CDP WebSocket endpoint discovered', { wsEndpoint });
+
+        // Connect to the running browser — always use vanilla puppeteer (no stealth patches
+        // on a real browser the user is already running)
+        const browser = await vanillaPuppeteer.connect({ browserWSEndpoint: wsEndpoint });
+
+        // Create a NEW page for Oktyv's work — never touch the user's existing tabs
+        const page = await browser.newPage();
+
+        // Set viewport for consistent rendering
+        const browserConfig = getDefaultConfig();
+        if (browserConfig.viewport) {
+          await page.setViewport(browserConfig.viewport);
+        }
+
+        const session: BrowserSession = {
+          platform,
+          browser,
+          page,
+          state: 'READY',
+          isLoggedIn: true,  // Assume logged in — we're using the user's real session
+          createdAt: new Date(),
+          lastActivityAt: new Date(),
+          config: { ...config },
+          connectedViaCDP: true,
+        };
+
+        this.sessions.set(platform, session);
+        logger.info('CDP session established — using running browser', { platform });
+        return session;
+
+      } catch (cdpError) {
+        logger.error('CDP connection failed — falling back to launch mode', { platform, cdpError });
+        // Fall through to normal launch below
+      }
+    }
+
+    // ── Launch Mode (default) ────────────────────────────────────────────────
     const userDataDir = config.userDataDir || join(this.baseUserDataDir, platform.toLowerCase());
 
     try {
@@ -430,9 +487,17 @@ export class BrowserSessionManager {
     }
 
     try {
-      logger.info('Closing browser session', { platform });
-      
-      await session.browser.close();
+      logger.info('Closing browser session', { platform, cdp: !!session.connectedViaCDP });
+
+      if (session.connectedViaCDP) {
+        // CDP mode: close only our page, leave the user's browser running
+        await session.page.close();
+        // Disconnect from the browser without killing it
+        session.browser.disconnect();
+      } else {
+        // Launch mode: close the entire browser we spawned
+        await session.browser.close();
+      }
       this.sessions.delete(platform);
       
       logger.info('Browser session closed', { platform });
