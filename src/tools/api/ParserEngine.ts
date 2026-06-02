@@ -12,7 +12,6 @@
  */
 
 import { parseStringPromise } from 'xml2js';
-import * as cheerio from 'cheerio';
 import { z } from 'zod';
 import { createLogger } from '../../utils/logger.js';
 
@@ -223,7 +222,11 @@ export class ParserEngine {
     selectors: Record<string, string> = {}
   ): Promise<any> {
     const htmlString = Buffer.isBuffer(data) ? data.toString('utf8') : String(data);
-    const $ = cheerio.load(htmlString);
+    // Lazy-load cheerio (~2.3s cold require) — only when actually parsing HTML, so it
+    // stays out of the startup path and the MCP initialize handshake stays fast.
+    const cheerioMod: any = await import('cheerio');
+    const load = cheerioMod.load ?? cheerioMod.default?.load;
+    const $ = load(htmlString);
     
     // If no selectors provided, return full HTML
     if (Object.keys(selectors).length === 0) {
@@ -247,7 +250,7 @@ export class ParserEngine {
         extracted[key] = elements.text().trim();
       } else {
         // Multiple elements: return array
-        extracted[key] = elements.map((_, el) => $(el).text().trim()).get();
+        extracted[key] = elements.map((_: any, el: any) => $(el).text().trim()).get();
       }
     }
     

@@ -5,23 +5,41 @@
  * login detection, and graceful cleanup.
  */
 
-// @ts-ignore — puppeteer-extra ships its own types but CJS/ESM interop is fussy
-import puppeteerExtra from 'puppeteer-extra';
-// @ts-ignore — same reason
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import vanillaPuppeteer from 'puppeteer';
+// LAZY PUPPETEER LOADING — the puppeteer stack (puppeteer, puppeteer-extra, stealth)
+// is the single heaviest cold-start cost in the whole server (several seconds to
+// require). Loading it eagerly at module-import time pushed the MCP `initialize`
+// handshake past Claude Desktop's 60s timeout on cold starts — the real reason Oktyv
+// dropped more than any other server. These now load on first browser launch/connect,
+// not at process startup, so the handshake stays fast.
+let _vanilla: any;
+let _extra: any;
 
-// Register stealth plugin on the extra wrapper. This patches navigator.webdriver,
-// canvas fingerprint, WebGL vendor, chrome.runtime, and 15+ other automation tells
-// that Cloudflare reads. ONLY applied to bundled Chromium. Real Chrome is real —
-// stealth patches there cause more problems than they solve (breaks Chrome's own
-// session restore by making the runtime look tampered with).
-puppeteerExtra.use(StealthPlugin());
+async function loadVanilla(): Promise<any> {
+  if (!_vanilla) {
+    _vanilla = (await import('puppeteer')).default;
+  }
+  return _vanilla;
+}
+
+async function loadExtra(): Promise<any> {
+  if (!_extra) {
+    // @ts-ignore — puppeteer-extra ships its own types but CJS/ESM interop is fussy
+    const puppeteerExtra = (await import('puppeteer-extra')).default;
+    // @ts-ignore — same reason
+    const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
+    // Register stealth plugin (patches navigator.webdriver, canvas/WebGL fingerprint,
+    // chrome.runtime, and 15+ other automation tells Cloudflare reads). ONLY applied to
+    // bundled Chromium — real Chrome is real, stealth patches there cause more problems.
+    puppeteerExtra.use(StealthPlugin());
+    _extra = puppeteerExtra;
+  }
+  return _extra;
+}
 
 // Pick the right puppeteer at launch time based on whether we're using real Chrome.
 // Bundled Chromium → stealth-wrapped puppeteer. Real Chrome → vanilla puppeteer.
-function getPuppeteer(useRealChrome: boolean): typeof vanillaPuppeteer {
-  return (useRealChrome ? vanillaPuppeteer : (puppeteerExtra as any)) as typeof vanillaPuppeteer;
+async function getPuppeteer(useRealChrome: boolean): Promise<any> {
+  return useRealChrome ? await loadVanilla() : await loadExtra();
 }
 import { mkdir } from 'fs/promises';
 import { join } from 'path';
@@ -116,6 +134,7 @@ export class BrowserSessionManager {
 
         // Connect to the running browser — always use vanilla puppeteer (no stealth patches
         // on a real browser the user is already running)
+        const vanillaPuppeteer = await loadVanilla();
         const browser = await vanillaPuppeteer.connect({ browserWSEndpoint: wsEndpoint });
 
         // Create a NEW page for Oktyv's work — never touch the user's existing tabs
@@ -195,7 +214,7 @@ export class BrowserSessionManager {
 
       // Launch browser — pick vanilla puppeteer when using real Chrome (no stealth),
       // stealth-wrapped puppeteer when using bundled Chromium.
-      const puppeteer = getPuppeteer(usingRealChrome);
+      const puppeteer = await getPuppeteer(usingRealChrome);
       const browser = await puppeteer.launch({
         headless: finalConfig.headless,
         userDataDir,

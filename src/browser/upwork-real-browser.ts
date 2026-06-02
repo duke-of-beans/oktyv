@@ -13,8 +13,6 @@
  * a server lifetime. Disposed on process exit.
  */
 
-// @ts-ignore — puppeteer-real-browser has a CJS default export that TS fights with
-import { connect } from 'puppeteer-real-browser';
 import type { Browser, Page } from 'puppeteer';
 import { createLogger } from '../utils/logger.js';
 import { loadAndApply } from './auth.js';
@@ -32,6 +30,13 @@ let launchPromise: Promise<RealBrowserSession> | null = null;
 
 async function launchRealBrowser(): Promise<RealBrowserSession> {
   logger.info('Launching puppeteer-real-browser for Upwork');
+
+  // Lazy-load puppeteer-real-browser — it's the single heaviest module in the server
+  // (~3.4s cold require). Loading it here instead of at module top keeps server startup
+  // fast so the MCP initialize handshake never trips Claude Desktop's 60s timeout.
+  // @ts-ignore — puppeteer-real-browser has a CJS default export that TS fights with
+  const rb: any = await import('puppeteer-real-browser');
+  const connect = rb.connect ?? rb.default?.connect ?? rb.default;
 
   const result = await connect({
     headless: false,

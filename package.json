@@ -1,6 +1,6 @@
 {
   "name": "oktyv",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Universal automation layer - Production ready with complete hardening suite",
   "main": "dist/index.js",
   "bin": {
@@ -8,7 +8,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node --input-type=commonjs -e \"const{cpSync,readdirSync,statSync,mkdirSync}=require('fs');const p=require('path');function walk(d,r=[]){readdirSync(d).forEach(f=>{const fp=p.join(d,f);statSync(fp).isDirectory()?walk(fp,r):fp.match(/\\.(sql|html|css|txt)$/)&&r.push(fp)});return r}walk('src').forEach(f=>{const d=f.replace(/^src/,'dist');mkdirSync(p.dirname(d),{recursive:true});cpSync(f,d);console.log('asset:',f)})\"",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "tsx --test tests/unit/connectors/*.test.ts tests/unit/tools/*.test.ts tests/unit/vault/*.test.ts tests/unit/api/*.test.ts tests/unit/database/*.test.ts tests/unit/email/*.test.ts tests/unit/file/*.test.ts tests/unit/cron/*.test.ts",
@@ -43,7 +43,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.975.0",
     "@aws-sdk/lib-storage": "^3.975.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "1.27.0",
     "@napi-rs/keyring": "^1.2.0",
     "@prisma/client": "^6.19.2",
     "@types/better-sqlite3": "^7.6.13",

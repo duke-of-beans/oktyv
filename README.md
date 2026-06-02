@@ -2,7 +2,7 @@
 
 Universal automation execution layer for AI agents.
 
-**Version:** 1.7.0 | **Status:** Production | **Tools:** 73 | **Engines:** 10
+**Version:** 1.7.1 | **Status:** Production | **Tools:** 73 | **Engines:** 10
 
 > Give your AI agent hands. Oktyv executes.
 
@@ -270,7 +270,7 @@ Add to `claude_desktop_config.json`:
   "mcpServers": {
     "oktyv": {
       "command": "node",
-      "args": ["/path/to/oktyv/dist/server.js"],
+      "args": ["/path/to/oktyv/dist/index.js"],
       "env": {
         "OKTYV_BROWSER_DATA_DIR": "/path/to/oktyv/browser-data",
         "PUPPETEER_CACHE_DIR": "/path/to/cache/puppeteer"
@@ -315,6 +315,8 @@ Claude
 
 **Multi-tenant ready.** Each engine is self-contained. The parallel engine's tool registry contains all other engines — any tool can be composed into a parallel batch.
 
+**Lazy-loaded for instant startup.** All heavy dependencies (puppeteer, cheerio, googleapis, mongodb, mysql2, pg, better-sqlite3) load via dynamic `import()` on first tool call, not at process startup. The MCP `initialize` handshake completes in ~500 ms. Engines finish background initialization within ~2 s — transparent to the caller via `ensureReady()` guards on every handler.
+
 **Vault-first design.** `api_request` reads credentials from the vault by name and injects them as Authorization headers. Secrets never appear in prompts or logs.
 
 **Isolated session for hostile platforms.** Upwork's Cloudflare Turnstile enforcement and Chrome 127+ App-Bound Encryption (v20) made the shared `BrowserSessionManager` insufficient. `UpworkConnector` runs its own `puppeteer-real-browser` session — other connectors are unaffected.
@@ -325,6 +327,7 @@ Claude
 
 | Version | Date | Changes |
 |---|---|---|
+| **1.7.1** | 2026-06-02 | **Lazy-loading cold-start fix** — all heavy deps (puppeteer, cheerio, googleapis, mongodb, mysql2, pg, better-sqlite3) now load via dynamic `import()` on first tool call instead of at server startup. MCP `initialize` response drops from 2–60+ s to **~500 ms**. Eliminates the 35% startup timeout failure rate that plagued Claude Desktop connections since April. SDK pinned exact `@modelcontextprotocol/sdk@1.27.0` (1.29.0 breaks handshake). Build script now copies non-TS assets (SQL, HTML, CSS) into dist. |
 | **1.7.0** | 2026-04-21 | **Upwork adapter** — `upwork_search_jobs`, `upwork_get_job`, `upwork_get_client`, `upwork_login_capture` (69→73 tools). Isolated `puppeteer-real-browser` session defeats Cloudflare Turnstile. Platform-agnostic cookie-JSON auth persistence (`src/browser/auth.ts`) for future authenticated-only endpoints. Chrome 146-compatible — replaces profile-dir persistence that broke on App-Bound Encryption (v20). |
 | **1.6.0** | 2026-04-16 | Email (8), Cron (12), Database (9), Indeed (3) engines wired as MCP tools — 37→69 total tools. Indeed connector bug fixes. |
 | **1.5.0** | 2026-04-16 | API Engine MCP tools — `api_request`, `api_oauth_init`, `api_oauth_callback`, `api_oauth_refresh`. Zoho added as OAuth provider. Vault-backed auth for any API. |

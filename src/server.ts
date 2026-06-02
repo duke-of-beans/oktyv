@@ -7,59 +7,125 @@
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import type { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { createLogger } from './utils/logger.js';
-import { BrowserSessionManager } from './browser/session.js';
-import { RateLimiter } from './browser/rate-limiter.js';
-import { LinkedInConnector } from './connectors/linkedin.js';
-import { WellfoundConnector } from './connectors/wellfound.js';
-import { GenericBrowserConnector } from './connectors/generic.js';
+// ── Lazy-loaded heavy deps ──────────────────────────────────────────────────
+// Type-only imports (erased at runtime) keep TypeScript happy.
+// Actual modules loaded via dynamic import() in _initEngines().
+// This keeps server startup <1 s so MCP initialize never times out.
+import type { BrowserSessionManager } from './browser/session.js';
+import type { RateLimiter } from './browser/rate-limiter.js';
+import type { LinkedInConnector } from './connectors/linkedin.js';
+import type { WellfoundConnector } from './connectors/wellfound.js';
+import type { GenericBrowserConnector } from './connectors/generic.js';
 import type { JobSearchParams } from './types/job.js';
 import { OktyvErrorCode } from './types/mcp.js';
-import { VaultEngine } from './tools/vault/VaultEngine.js';
-import { FileEngine } from './tools/file/FileEngine.js';
-import { ApiEngine } from './tools/api/ApiEngine.js';
-import { EmailEngine } from './tools/email/EmailEngine.js';
-import { CronEngine } from './tools/cron/CronEngine.js';
-import { DatabaseEngine } from './tools/database/DatabaseEngine.js';
-import { IndeedConnector } from './connectors/indeed.js';
-import { UpworkConnector } from './connectors/upwork.js';
-import { ParallelExecutionEngine } from './engines/parallel/ParallelExecutionEngine.js';
-import { ShellEngine } from './engines/shell/ShellEngine.js';
-import { VisualInspectionConnector } from './connectors/visual-inspection.js';
-import { ensureScreenshotsBaseExists } from './browser/session-manager.js';
+import type { VaultEngine } from './tools/vault/VaultEngine.js';
+import type { FileEngine } from './tools/file/FileEngine.js';
+import type { ApiEngine } from './tools/api/ApiEngine.js';
+import type { EmailEngine } from './tools/email/EmailEngine.js';
+import type { CronEngine } from './tools/cron/CronEngine.js';
+import type { DatabaseEngine } from './tools/database/DatabaseEngine.js';
+import type { IndeedConnector } from './connectors/indeed.js';
+import type { UpworkConnector } from './connectors/upwork.js';
+import type { ParallelExecutionEngine } from './engines/parallel/ParallelExecutionEngine.js';
+import type { ShellEngine } from './engines/shell/ShellEngine.js';
+import type { VisualInspectionConnector } from './connectors/visual-inspection.js';
 
 const logger = createLogger('server');
 
 export class OktyvServer {
   private server: McpServer;
-  private sessionManager: BrowserSessionManager;
-  private rateLimiter: RateLimiter;
-  private linkedInConnector: LinkedInConnector;
-  private wellfoundConnector: WellfoundConnector;
-  private genericConnector: GenericBrowserConnector;
-  private visualConnector: VisualInspectionConnector;
-  private vaultEngine: VaultEngine;
-  private fileEngine: FileEngine;
-  private apiEngine: ApiEngine;
-  private emailEngine: EmailEngine;
-  private cronEngine: CronEngine;
-  private databaseEngine: DatabaseEngine;
-  private indeedConnector: IndeedConnector;
-  private upworkConnector: UpworkConnector;
-  private parallelEngine: ParallelExecutionEngine;
-  private shellEngine: ShellEngine;
+  // Engine/connector instances — set by _initEngines(), accessed after ensureReady()
+  private sessionManager!: BrowserSessionManager;
+  private rateLimiter!: RateLimiter;
+  private linkedInConnector!: LinkedInConnector;
+  private wellfoundConnector!: WellfoundConnector;
+  private genericConnector!: GenericBrowserConnector;
+  private visualConnector!: VisualInspectionConnector;
+  private vaultEngine!: VaultEngine;
+  private fileEngine!: FileEngine;
+  private apiEngine!: ApiEngine;
+  private emailEngine!: EmailEngine;
+  private cronEngine!: CronEngine;
+  private databaseEngine!: DatabaseEngine;
+  private indeedConnector!: IndeedConnector;
+  private upworkConnector!: UpworkConnector;
+  private parallelEngine!: ParallelExecutionEngine;
+  private shellEngine!: ShellEngine;
+
+  /** Resolves when all heavy deps are loaded and engines instantiated. */
+  private _enginesReady: Promise<void>;
 
   constructor() {
     this.server = new McpServer({
       name: 'oktyv',
-      version: '1.6.0',
+      version: '1.7.1',
     });
 
-    // Initialize browser infrastructure
+    // Register all tools declaratively with Zod schemas.
+    // Schemas are lightweight (just z.string() etc.) — no heavy deps needed.
+    // Handlers call ensureReady() before touching any engine/connector.
+    this.registerTools();
+
+    // Kick off heavy-dep loading in background (not awaited here).
+    // Tool handlers will await this before executing.
+    this._enginesReady = this._initEngines();
+
+    logger.info('Oktyv Server initialized (tools registered, engines loading in background)');
+  }
+
+  /**
+   * Dynamically import all heavy modules and instantiate engines/connectors.
+   * Called once in constructor; tool handlers await the returned promise.
+   */
+  private async _initEngines(): Promise<void> {
+    const t0 = Date.now();
+    console.error('[Oktyv] Loading engines...');
+
+    // Dynamic imports — these are the heavy deps (puppeteer, cheerio, etc.)
+    const [
+      { BrowserSessionManager },
+      { RateLimiter },
+      { LinkedInConnector },
+      { WellfoundConnector },
+      { GenericBrowserConnector },
+      { VisualInspectionConnector },
+      { VaultEngine },
+      { FileEngine },
+      { ApiEngine },
+      { EmailEngine },
+      { CronEngine },
+      { DatabaseEngine },
+      { IndeedConnector },
+      { UpworkConnector },
+      { ParallelExecutionEngine },
+      { ShellEngine },
+      { ensureScreenshotsBaseExists },
+    ] = await Promise.all([
+      import('./browser/session.js'),
+      import('./browser/rate-limiter.js'),
+      import('./connectors/linkedin.js'),
+      import('./connectors/wellfound.js'),
+      import('./connectors/generic.js'),
+      import('./connectors/visual-inspection.js'),
+      import('./tools/vault/VaultEngine.js'),
+      import('./tools/file/FileEngine.js'),
+      import('./tools/api/ApiEngine.js'),
+      import('./tools/email/EmailEngine.js'),
+      import('./tools/cron/CronEngine.js'),
+      import('./tools/database/DatabaseEngine.js'),
+      import('./connectors/indeed.js'),
+      import('./connectors/upwork.js'),
+      import('./engines/parallel/ParallelExecutionEngine.js'),
+      import('./engines/shell/ShellEngine.js'),
+      import('./browser/session-manager.js'),
+    ]);
+
+    // Instantiate everything (same logic as old constructor)
     this.sessionManager = new BrowserSessionManager();
     this.rateLimiter = new RateLimiter();
     this.linkedInConnector = new LinkedInConnector(this.sessionManager, this.rateLimiter);
@@ -67,60 +133,48 @@ export class OktyvServer {
     this.genericConnector = new GenericBrowserConnector(this.sessionManager, this.rateLimiter);
     this.visualConnector = new VisualInspectionConnector(this.sessionManager, this.rateLimiter);
 
-    // Ensure temp screenshots dir exists on startup (D:\ only, never C:\)
     ensureScreenshotsBaseExists().catch(err =>
       logger.warn('Could not create screenshots base dir', { err })
     );
 
-    // Initialize vault infrastructure
     this.vaultEngine = new VaultEngine();
-
-    // Initialize API engine — pass vault bridge functions so OAuthManager can store tokens
     this.apiEngine = new ApiEngine(
       (vaultName: string, key: string) => this.vaultEngine.get(vaultName, key),
       (vaultName: string, key: string, value: string) => this.vaultEngine.set(vaultName, key, value)
     );
-
-    // Initialize email engine
     this.emailEngine = new EmailEngine(
       (vault: string, key: string) => this.vaultEngine.get(vault, key),
       (url: string, options?: any) => this.apiEngine.request(url, options)
     );
 
-    // Initialize cron engine — explicit data path so it works regardless of cwd
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
     const cronDbPath = path.join(__dirname, '..', 'data', 'cron.db');
     this.cronEngine = new CronEngine(cronDbPath);
 
-    // Initialize database engine
     this.databaseEngine = new DatabaseEngine(
       (vault: string, key: string) => this.vaultEngine.get(vault, key)
     );
 
-    // Initialize Indeed connector
     this.indeedConnector = new IndeedConnector(this.sessionManager, this.rateLimiter);
-
-    // Initialize Upwork connector
     this.upworkConnector = new UpworkConnector(this.sessionManager, this.rateLimiter);
-
-    // Initialize file infrastructure
     this.fileEngine = new FileEngine();
 
-    // Initialize parallel execution infrastructure
     const toolRegistry = new Map<string, (params: Record<string, any>) => Promise<any>>();
     this.parallelEngine = new ParallelExecutionEngine(toolRegistry);
-
-    // Register all tools declaratively with Zod schemas
-    this.registerTools();
-
-    // Initialize shell engine
     this.shellEngine = new ShellEngine();
-
-    // Populate tool registry for parallel execution engine
     this.populateToolRegistry(toolRegistry);
 
-    logger.info('Oktyv Server initialized');
+    console.error(`[Oktyv] Engines ready in ${Date.now() - t0}ms`);
+    logger.info('All engines initialized', { durationMs: Date.now() - t0 });
+  }
+
+  /**
+   * Await this before any tool handler that touches an engine/connector.
+   * First call blocks until _initEngines() finishes; subsequent calls are instant.
+   */
+  private ensureReady(): Promise<void> {
+    return this._enginesReady;
   }
 
   // ============================================================================
@@ -140,7 +194,7 @@ export class OktyvServer {
         remote: z.boolean().optional().describe('Filter for remote positions only'),
         limit: z.number().min(1).max(50).optional().describe('Maximum number of results (default: 10)'),
       },
-      async (args) => this.handleLinkedInSearchJobs(args),
+      async (args) => { await this.ensureReady(); return this.handleLinkedInSearchJobs(args); },
     );
 
     this.server.tool(
@@ -150,7 +204,7 @@ export class OktyvServer {
         jobId: z.string().describe('LinkedIn job ID'),
         includeCompany: z.boolean().optional().describe('Whether to fetch company details (default: false)'),
       },
-      async (args) => this.handleLinkedInGetJob(args),
+      async (args) => { await this.ensureReady(); return this.handleLinkedInGetJob(args); },
     );
 
     this.server.tool(
@@ -159,7 +213,7 @@ export class OktyvServer {
       {
         companyId: z.string().describe('LinkedIn company ID or vanity name'),
       },
-      async (args) => this.handleLinkedInGetCompany(args),
+      async (args) => { await this.ensureReady(); return this.handleLinkedInGetCompany(args); },
     );
 
     // ── Wellfound ─────────────────────────────────────────────────────────────
@@ -173,7 +227,7 @@ export class OktyvServer {
         remote: z.boolean().optional().describe('Filter for remote positions only'),
         limit: z.number().min(1).max(50).optional().describe('Maximum number of results (default: 10)'),
       },
-      async (args) => this.handleWellfoundSearchJobs(args),
+      async (args) => { await this.ensureReady(); return this.handleWellfoundSearchJobs(args); },
     );
 
     this.server.tool(
@@ -183,7 +237,7 @@ export class OktyvServer {
         jobSlug: z.string().describe('Wellfound job slug (from search results)'),
         includeCompany: z.boolean().optional().describe('Whether to fetch company details (default: false)'),
       },
-      async (args) => this.handleWellfoundGetJob(args),
+      async (args) => { await this.ensureReady(); return this.handleWellfoundGetJob(args); },
     );
 
     this.server.tool(
@@ -192,7 +246,7 @@ export class OktyvServer {
       {
         companySlug: z.string().describe('Wellfound company slug'),
       },
-      async (args) => this.handleWellfoundGetCompany(args),
+      async (args) => { await this.ensureReady(); return this.handleWellfoundGetCompany(args); },
     );
 
     // ── Generic Browser ───────────────────────────────────────────────────────
@@ -205,7 +259,7 @@ export class OktyvServer {
         waitForSelector: z.string().optional().describe('CSS selector to wait for after navigation'),
         timeout: z.number().optional().describe('Timeout in milliseconds (default: 30000)'),
       },
-      async (args) => this.handleBrowserNavigate(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserNavigate(args); },
     );
 
     this.server.tool(
@@ -216,7 +270,7 @@ export class OktyvServer {
         waitForNavigation: z.boolean().optional().describe('Wait for page navigation after click (default: false)'),
         timeout: z.number().optional().describe('Timeout in milliseconds (default: 10000)'),
       },
-      async (args) => this.handleBrowserClick(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserClick(args); },
     );
 
     this.server.tool(
@@ -228,7 +282,7 @@ export class OktyvServer {
         delay: z.number().optional().describe('Delay between keystrokes in ms (default: 50)'),
         clear: z.boolean().optional().describe('Clear existing text first (default: false)'),
       },
-      async (args) => this.handleBrowserType(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserType(args); },
     );
 
     this.server.tool(
@@ -238,7 +292,7 @@ export class OktyvServer {
         selectors: z.record(z.string()).describe('Map of keys to CSS selectors'),
         multiple: z.boolean().optional().describe('Extract from all matching elements (default: false)'),
       },
-      async (args) => this.handleBrowserExtract(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserExtract(args); },
     );
 
     this.server.tool(
@@ -248,7 +302,7 @@ export class OktyvServer {
         fullPage: z.boolean().optional().describe('Capture full scrollable page (default: false)'),
         selector: z.string().optional().describe('CSS selector of specific element to screenshot'),
       },
-      async (args) => this.handleBrowserScreenshot(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserScreenshot(args); },
     );
 
     this.server.tool(
@@ -258,7 +312,7 @@ export class OktyvServer {
         format: z.enum(['Letter', 'Legal', 'A4']).optional().describe('Paper format (default: Letter)'),
         landscape: z.boolean().optional().describe('Use landscape orientation (default: false)'),
       },
-      async (args) => this.handleBrowserPdf(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserPdf(args); },
     );
 
     this.server.tool(
@@ -269,7 +323,7 @@ export class OktyvServer {
         submitSelector: z.string().optional().describe('CSS selector of submit button'),
         submitWaitForNavigation: z.boolean().optional().describe('Wait for navigation after submit (default: false)'),
       },
-      async (args) => this.handleBrowserFormFill(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserFormFill(args); },
     );
 
     // ── Visual Inspection ─────────────────────────────────────────────────────
@@ -286,7 +340,7 @@ export class OktyvServer {
         waitAfterScroll: z.number().optional().describe('ms to wait after scroll before capture (default: 300)'),
         cleanup: z.boolean().optional().describe('Delete temp files after returning result (default: true)'),
       },
-      async (args) => this.handleBrowserScrollCapture(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserScrollCapture(args); },
     );
 
     this.server.tool(
@@ -299,7 +353,7 @@ export class OktyvServer {
         padding: z.number().optional().describe('Extra px around element bounding box (default: 8)'),
         cleanup: z.boolean().optional().describe('Delete temp files after returning result (default: true)'),
       },
-      async (args) => this.handleBrowserSelectorCapture(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserSelectorCapture(args); },
     );
 
     this.server.tool(
@@ -315,7 +369,7 @@ export class OktyvServer {
         ).describe('Map of human labels to selector configs'),
         url: z.string().optional().describe('URL to navigate to first'),
       },
-      async (args) => this.handleBrowserComputedStyles(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserComputedStyles(args); },
     );
 
     this.server.tool(
@@ -338,7 +392,7 @@ export class OktyvServer {
         outputDir: z.string().optional().describe('Shared base output dir for this batch'),
         cleanup: z.boolean().optional().describe('Delete all temp files after batch completes (default: true)'),
       },
-      async (args) => this.handleBrowserBatchAudit(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserBatchAudit(args); },
     );
 
     this.server.tool(
@@ -347,7 +401,7 @@ export class OktyvServer {
       {
         sessionDir: z.string().describe('Full path to the session directory to delete (must be under D:/Dev/oktyv/screenshots/temp/)'),
       },
-      async (args) => this.handleBrowserSessionCleanup(args),
+      async (args) => { await this.ensureReady(); return this.handleBrowserSessionCleanup(args); },
     );
 
     this.server.tool(
@@ -356,7 +410,7 @@ export class OktyvServer {
       {
         path: z.string().describe('Absolute path to image file on D:\\. Supported: .png .jpg .jpeg .gif .webp .bmp .svg'),
       },
-      async (args) => this.handleImageRead(args),
+      async (args) => { await this.ensureReady(); return this.handleImageRead(args); },
     );
 
     // ── Vault Engine ──────────────────────────────────────────────────────────
@@ -369,7 +423,7 @@ export class OktyvServer {
         credentialName: z.string().min(1).max(100).regex(/^[a-z0-9-_]+$/).describe('Credential name (lowercase, alphanumeric, hyphens, underscores)'),
         value: z.string().min(1).max(10000).describe('Secret value to store (encrypted with AES-256-GCM)'),
       },
-      async (args) => this.handleVaultSet(args),
+      async (args) => { await this.ensureReady(); return this.handleVaultSet(args); },
     );
 
     this.server.tool(
@@ -379,7 +433,7 @@ export class OktyvServer {
         vaultName: z.string().describe('Vault name'),
         credentialName: z.string().describe('Credential name'),
       },
-      async (args) => this.handleVaultGet(args),
+      async (args) => { await this.ensureReady(); return this.handleVaultGet(args); },
     );
 
     this.server.tool(
@@ -388,7 +442,7 @@ export class OktyvServer {
       {
         vaultName: z.string().describe('Vault name'),
       },
-      async (args) => this.handleVaultList(args),
+      async (args) => { await this.ensureReady(); return this.handleVaultList(args); },
     );
 
     this.server.tool(
@@ -398,7 +452,7 @@ export class OktyvServer {
         vaultName: z.string().describe('Vault name'),
         credentialName: z.string().describe('Credential name to delete'),
       },
-      async (args) => this.handleVaultDelete(args),
+      async (args) => { await this.ensureReady(); return this.handleVaultDelete(args); },
     );
 
     this.server.tool(
@@ -407,14 +461,14 @@ export class OktyvServer {
       {
         vaultName: z.string().describe('Vault name to delete'),
       },
-      async (args) => this.handleVaultDeleteVault(args),
+      async (args) => { await this.ensureReady(); return this.handleVaultDeleteVault(args); },
     );
 
     this.server.tool(
       'vault_list_vaults',
       'List all vaults. Returns array of vault names.',
       {},
-      async (args) => this.handleVaultListVaults(args),
+      async (args) => { await this.ensureReady(); return this.handleVaultListVaults(args); },
     );
 
     // ── File Engine ───────────────────────────────────────────────────────────
@@ -428,7 +482,7 @@ export class OktyvServer {
         recursive: z.boolean().optional().describe('Copy directories recursively (default: false)'),
         overwrite: z.boolean().optional().describe('Overwrite if destination exists (default: false)'),
       },
-      async (args) => this.handleFileCopy(args),
+      async (args) => { await this.ensureReady(); return this.handleFileCopy(args); },
     );
 
     this.server.tool(
@@ -438,7 +492,7 @@ export class OktyvServer {
         path: z.string().describe('Path to delete'),
         recursive: z.boolean().optional().describe('Delete directories recursively (default: false)'),
       },
-      async (args) => this.handleFileDelete(args),
+      async (args) => { await this.ensureReady(); return this.handleFileDelete(args); },
     );
 
     this.server.tool(
@@ -449,7 +503,7 @@ export class OktyvServer {
         sources: z.array(z.string()).describe('Files/directories to archive'),
         destination: z.string().describe('Output archive path'),
       },
-      async (args) => this.handleFileArchiveCreate(args),
+      async (args) => { await this.ensureReady(); return this.handleFileArchiveCreate(args); },
     );
 
     this.server.tool(
@@ -460,7 +514,7 @@ export class OktyvServer {
         destination: z.string().describe('Extraction destination'),
         format: z.enum(['zip', 'tar', 'tar.gz']).optional().describe('Archive format (auto-detect if not provided)'),
       },
-      async (args) => this.handleFileArchiveExtract(args),
+      async (args) => { await this.ensureReady(); return this.handleFileArchiveExtract(args); },
     );
 
     this.server.tool(
@@ -470,7 +524,7 @@ export class OktyvServer {
         archive: z.string().describe('Archive path'),
         format: z.enum(['zip', 'tar', 'tar.gz']).optional().describe('Archive format (auto-detect if not provided)'),
       },
-      async (args) => this.handleFileArchiveList(args),
+      async (args) => { await this.ensureReady(); return this.handleFileArchiveList(args); },
     );
 
     this.server.tool(
@@ -480,7 +534,7 @@ export class OktyvServer {
         path: z.string().describe('File path'),
         algorithm: z.enum(['md5', 'sha1', 'sha256', 'sha512']).optional().describe('Hash algorithm (default: sha256)'),
       },
-      async (args) => this.handleFileHash(args),
+      async (args) => { await this.ensureReady(); return this.handleFileHash(args); },
     );
 
     // ── Parallel Execution Engine ─────────────────────────────────────────────
@@ -504,7 +558,7 @@ export class OktyvServer {
           timeout: z.number().optional().describe('Overall execution timeout in milliseconds'),
         }).optional().describe('Optional execution configuration'),
       },
-      async (args) => this.handleParallelExecute(args),
+      async (args) => { await this.ensureReady(); return this.handleParallelExecute(args); },
     );
 
     // -- Shell Engine ----------------------------------------------------------
@@ -531,7 +585,7 @@ export class OktyvServer {
           defaultShell: z.string().optional().describe('Default shell'),
         }).optional(),
       },
-      async (args) => this.handleShellBatch(args),
+      async (args) => { await this.ensureReady(); return this.handleShellBatch(args); },
     );
 
     // -- API Engine -----------------------------------------------------------
@@ -549,7 +603,7 @@ export class OktyvServer {
         credentialName: z.string().optional().describe('Credential name in vault'),
         tokenPrefix: z.string().optional().default('Bearer').describe('Token prefix (Bearer, sso-key, etc.)'),
       },
-      async (args) => this.handleApiRequest(args),
+      async (args) => { await this.ensureReady(); return this.handleApiRequest(args); },
     );
 
     this.server.tool(
@@ -561,7 +615,7 @@ export class OktyvServer {
         redirectUri: z.string().url().describe('Redirect URI'),
         scopes: z.array(z.string()).describe('Scopes to request'),
       },
-      async (args) => this.handleApiOAuthInit(args),
+      async (args) => { await this.ensureReady(); return this.handleApiOAuthInit(args); },
     );
 
     this.server.tool(
@@ -575,7 +629,7 @@ export class OktyvServer {
         redirectUri: z.string().url().describe('Redirect URI (must match init)'),
         userId: z.string().describe('Identifier to store tokens under (e.g. david)'),
       },
-      async (args) => this.handleApiOAuthCallback(args),
+      async (args) => { await this.ensureReady(); return this.handleApiOAuthCallback(args); },
     );
 
     this.server.tool(
@@ -587,7 +641,7 @@ export class OktyvServer {
         clientId: z.string().describe('OAuth client ID'),
         clientSecret: z.string().describe('OAuth client secret'),
       },
-      async (args) => this.handleApiOAuthRefresh(args),
+      async (args) => { await this.ensureReady(); return this.handleApiOAuthRefresh(args); },
     );
 
     // -- Indeed Connector -------------------------------------------------------
@@ -597,16 +651,16 @@ export class OktyvServer {
       location: z.string().optional().describe('City, state, or country'),
       remote: z.boolean().optional().describe('Filter for remote positions'),
       limit: z.number().min(1).max(50).optional().describe('Maximum results (default: 10)'),
-    }, async (args) => this.handleIndeedSearchJobs(args));
+    }, async (args) => { await this.ensureReady(); return this.handleIndeedSearchJobs(args); });
 
     this.server.tool('indeed_get_job', 'Get full job details from Indeed by job key', {
       jobKey: z.string().describe('Indeed job key (jk= param from search results)'),
       includeCompany: z.boolean().optional().describe('Also fetch company details (default: false)'),
-    }, async (args) => this.handleIndeedGetJob(args));
+    }, async (args) => { await this.ensureReady(); return this.handleIndeedGetJob(args); });
 
     this.server.tool('indeed_get_company', 'Get company profile from Indeed', {
       companyId: z.string().describe('Indeed company ID or slug'),
-    }, async (args) => this.handleIndeedGetCompany(args));
+    }, async (args) => { await this.ensureReady(); return this.handleIndeedGetCompany(args); });
 
     // -- Email Engine -----------------------------------------------------------
 
@@ -619,7 +673,7 @@ export class OktyvServer {
       credentialName: z.string().optional().describe('Credential in vault (format: username:password)'),
       username: z.string().optional().describe('SMTP username (alternative to vault)'),
       password: z.string().optional().describe('SMTP password (alternative to vault)'),
-    }, async (args) => this.handleEmailSmtpConnect(args));
+    }, async (args) => { await this.ensureReady(); return this.handleEmailSmtpConnect(args); });
 
     this.server.tool('email_smtp_send', 'Send email via connected SMTP server', {
       connectionId: z.string().describe('SMTP connection identifier'),
@@ -631,7 +685,7 @@ export class OktyvServer {
       cc: z.array(z.string().email()).optional().describe('CC recipients'),
       bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
       replyTo: z.string().email().optional().describe('Reply-To address'),
-    }, async (args) => this.handleEmailSmtpSend(args));
+    }, async (args) => { await this.ensureReady(); return this.handleEmailSmtpSend(args); });
 
     this.server.tool('email_imap_connect', 'Connect to IMAP server for reading email', {
       connectionId: z.string().describe('Unique identifier for this connection'),
@@ -642,7 +696,7 @@ export class OktyvServer {
       credentialName: z.string().optional().describe('Credential in vault (format: username:password)'),
       username: z.string().optional().describe('IMAP username (alternative to vault)'),
       password: z.string().optional().describe('IMAP password (alternative to vault)'),
-    }, async (args) => this.handleEmailImapConnect(args));
+    }, async (args) => { await this.ensureReady(); return this.handleEmailImapConnect(args); });
 
     this.server.tool('email_imap_fetch', 'Fetch emails from IMAP server with optional filtering', {
       connectionId: z.string().describe('IMAP connection identifier'),
@@ -650,7 +704,7 @@ export class OktyvServer {
       criteria: z.array(z.string()).optional().describe('Search criteria e.g. ["UNSEEN"] or ["FROM", "example@email.com"]'),
       limit: z.number().optional().describe('Max emails to fetch (default: 10)'),
       markSeen: z.boolean().optional().describe('Mark as seen after fetching (default: false)'),
-    }, async (args) => this.handleEmailImapFetch(args));
+    }, async (args) => { await this.ensureReady(); return this.handleEmailImapFetch(args); });
 
     this.server.tool('email_gmail_send', 'Send email via Gmail API (requires OAuth token in vault)', {
       userId: z.string().describe('Gmail user email address'),
@@ -660,24 +714,24 @@ export class OktyvServer {
       html: z.boolean().optional().describe('Whether body is HTML (default: false)'),
       cc: z.array(z.string().email()).optional().describe('CC recipients'),
       bcc: z.array(z.string().email()).optional().describe('BCC recipients'),
-    }, async (args) => this.handleEmailGmailSend(args));
+    }, async (args) => { await this.ensureReady(); return this.handleEmailGmailSend(args); });
 
     this.server.tool('email_gmail_read', 'List and read emails from Gmail using search query', {
       userId: z.string().describe('Gmail user email address'),
       query: z.string().optional().describe('Gmail search query (e.g. "is:unread", "from:someone@example.com")'),
       maxResults: z.number().optional().describe('Max results (default: 10)'),
-    }, async (args) => this.handleEmailGmailRead(args));
+    }, async (args) => { await this.ensureReady(); return this.handleEmailGmailRead(args); });
 
     this.server.tool('email_gmail_search', 'Search Gmail messages with advanced query syntax', {
       userId: z.string().describe('Gmail user email address'),
       query: z.string().describe('Gmail search query (e.g. "subject:invoice after:2025/01/01")'),
       maxResults: z.number().optional().describe('Max results (default: 10)'),
-    }, async (args) => this.handleEmailGmailSearch(args));
+    }, async (args) => { await this.ensureReady(); return this.handleEmailGmailSearch(args); });
 
     this.server.tool('email_parse', 'Parse a raw MIME email message and extract content', {
       raw: z.string().describe('Raw email message in MIME format'),
       includeAttachments: z.boolean().optional().describe('Extract attachments (default: true)'),
-    }, async (args) => this.handleEmailParse(args));
+    }, async (args) => { await this.ensureReady(); return this.handleEmailParse(args); });
 
     // -- Cron Engine ------------------------------------------------------------
 
@@ -694,33 +748,33 @@ export class OktyvServer {
       retryCount: z.number().optional().describe('Retries on failure (default: 0)'),
       timeout: z.number().optional().describe('Execution timeout ms (default: 30000)'),
       enabled: z.boolean().optional().describe('Enable immediately (default: true)'),
-    }, async (args) => this.handleCronCreateTask(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronCreateTask(args); });
 
     this.server.tool('cron_list_tasks', 'List all scheduled tasks with optional filters', {
       enabled: z.boolean().optional().describe('Filter by enabled status'),
       scheduleType: z.enum(['cron', 'interval', 'once']).optional().describe('Filter by schedule type'),
       limit: z.number().optional().describe('Max results (default: 50)'),
-    }, async (args) => this.handleCronListTasks(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronListTasks(args); });
 
     this.server.tool('cron_get_task', 'Get details of a specific scheduled task', {
       taskId: z.string().describe('Task ID'),
-    }, async (args) => this.handleCronGetTask(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronGetTask(args); });
 
     this.server.tool('cron_enable_task', 'Enable a scheduled task', {
       taskId: z.string().describe('Task ID'),
-    }, async (args) => this.handleCronEnableTask(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronEnableTask(args); });
 
     this.server.tool('cron_disable_task', 'Disable a scheduled task', {
       taskId: z.string().describe('Task ID'),
-    }, async (args) => this.handleCronDisableTask(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronDisableTask(args); });
 
     this.server.tool('cron_delete_task', 'Delete a scheduled task permanently', {
       taskId: z.string().describe('Task ID'),
-    }, async (args) => this.handleCronDeleteTask(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronDeleteTask(args); });
 
     this.server.tool('cron_execute_now', 'Execute a task immediately, ignoring its schedule', {
       taskId: z.string().describe('Task ID'),
-    }, async (args) => this.handleCronExecuteNow(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronExecuteNow(args); });
 
     this.server.tool('cron_update_task', 'Update an existing scheduled task', {
       taskId: z.string().describe('Task ID'),
@@ -730,25 +784,25 @@ export class OktyvServer {
       actionConfig: z.record(z.any()).optional().describe('New action config'),
       timezone: z.string().optional().describe('New timezone'),
       timeout: z.number().optional().describe('New timeout ms'),
-    }, async (args) => this.handleCronUpdateTask(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronUpdateTask(args); });
 
     this.server.tool('cron_get_history', 'Get execution history for a task', {
       taskId: z.string().describe('Task ID'),
       limit: z.number().optional().describe('Max results (default: 50)'),
-    }, async (args) => this.handleCronGetHistory(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronGetHistory(args); });
 
     this.server.tool('cron_get_statistics', 'Get execution statistics for a task', {
       taskId: z.string().describe('Task ID'),
-    }, async (args) => this.handleCronGetStatistics(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronGetStatistics(args); });
 
     this.server.tool('cron_clear_history', 'Clear execution history for a task', {
       taskId: z.string().describe('Task ID'),
-    }, async (args) => this.handleCronClearHistory(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronClearHistory(args); });
 
     this.server.tool('cron_validate_expression', 'Validate a cron expression and get next run times', {
       expression: z.string().describe('Cron expression to validate'),
       timezone: z.string().optional().describe('Timezone for next run calculation'),
-    }, async (args) => this.handleCronValidateExpression(args));
+    }, async (args) => { await this.ensureReady(); return this.handleCronValidateExpression(args); });
 
     // -- Database Engine --------------------------------------------------------
 
@@ -759,7 +813,7 @@ export class OktyvServer {
       credentialName: z.string().optional().describe('Credential name in vault'),
       connectionString: z.string().optional().describe('Direct connection string (alternative to vault)'),
       poolSize: z.number().optional().describe('Connection pool size (default: 10)'),
-    }, async (args) => this.handleDbConnect(args));
+    }, async (args) => { await this.ensureReady(); return this.handleDbConnect(args); });
 
     this.server.tool('db_query', 'Query records from a table or collection', {
       connectionId: z.string().describe('Connection identifier'),
@@ -769,42 +823,42 @@ export class OktyvServer {
       orderBy: z.record(z.enum(['asc', 'desc'])).optional().describe('Sort order'),
       limit: z.number().optional().describe('Max records to return'),
       offset: z.number().optional().describe('Records to skip'),
-    }, async (args) => this.handleDbQuery(args));
+    }, async (args) => { await this.ensureReady(); return this.handleDbQuery(args); });
 
     this.server.tool('db_insert', 'Insert one or more records into a table or collection', {
       connectionId: z.string().describe('Connection identifier'),
       table: z.string().describe('Table or collection name'),
       data: z.union([z.record(z.any()), z.array(z.record(z.any()))]).describe('Record(s) to insert'),
-    }, async (args) => this.handleDbInsert(args));
+    }, async (args) => { await this.ensureReady(); return this.handleDbInsert(args); });
 
     this.server.tool('db_update', 'Update records matching the WHERE clause', {
       connectionId: z.string().describe('Connection identifier'),
       table: z.string().describe('Table or collection name'),
       where: z.record(z.any()).describe('Filter conditions (required)'),
       data: z.record(z.any()).describe('Data to update'),
-    }, async (args) => this.handleDbUpdate(args));
+    }, async (args) => { await this.ensureReady(); return this.handleDbUpdate(args); });
 
     this.server.tool('db_delete', 'Delete records matching the WHERE clause', {
       connectionId: z.string().describe('Connection identifier'),
       table: z.string().describe('Table or collection name'),
       where: z.record(z.any()).describe('Filter conditions (required for safety)'),
-    }, async (args) => this.handleDbDelete(args));
+    }, async (args) => { await this.ensureReady(); return this.handleDbDelete(args); });
 
     this.server.tool('db_raw_query', 'Execute raw SQL with parameter binding (SQL databases only)', {
       connectionId: z.string().describe('Connection identifier'),
       query: z.string().describe('SQL query with $1, $2 placeholders'),
       params: z.array(z.any()).optional().describe('Query parameters'),
-    }, async (args) => this.handleDbRawQuery(args));
+    }, async (args) => { await this.ensureReady(); return this.handleDbRawQuery(args); });
 
     this.server.tool('db_aggregate', 'Execute MongoDB aggregation pipeline (MongoDB only)', {
       connectionId: z.string().describe('Connection identifier'),
       collection: z.string().describe('Collection name'),
       pipeline: z.array(z.record(z.any())).describe('Aggregation pipeline stages'),
-    }, async (args) => this.handleDbAggregate(args));
+    }, async (args) => { await this.ensureReady(); return this.handleDbAggregate(args); });
 
     this.server.tool('db_disconnect', 'Disconnect and close a database connection', {
       connectionId: z.string().describe('Connection identifier'),
-    }, async (args) => this.handleDbDisconnect(args));
+    }, async (args) => { await this.ensureReady(); return this.handleDbDisconnect(args); });
 
     this.server.tool('db_transaction', 'Execute multiple operations in an ACID transaction with automatic deadlock retry', {
       connectionId: z.string().describe('Connection identifier'),
@@ -818,7 +872,7 @@ export class OktyvServer {
       })).describe('Operations to execute in transaction'),
       maxRetries: z.number().optional().describe('Max retries on deadlock (default: 3)'),
       timeout: z.number().optional().describe('Transaction timeout ms (default: 30000)'),
-    }, async (args) => this.handleDbTransaction(args));
+    }, async (args) => { await this.ensureReady(); return this.handleDbTransaction(args); });
 
 
     // -- Upwork Connector -------------------------------------------------------
@@ -832,20 +886,20 @@ export class OktyvServer {
       upworkExperienceLevel: z.enum(['entry','intermediate','expert']).optional().describe('Upwork contractor tier'),
       upworkProjectLength: z.enum(['short','medium','long','ongoing']).optional().describe('Project duration filter'),
       upworkPaymentVerifiedOnly: z.boolean().optional().describe('Only return jobs from payment-verified clients'),
-    }, async (args) => this.handleUpworkSearchJobs(args));
+    }, async (args) => { await this.ensureReady(); return this.handleUpworkSearchJobs(args); });
 
     this.server.tool('upwork_get_job', 'Get full Upwork job detail including bid range (Plus users), proposals count, client history, connects required', {
       jobId: z.string().describe('Upwork job ID (the ~022... fragment from the URL)'),
       includeClient: z.boolean().optional().describe('Also fetch client profile if a client link is present (default: false)'),
-    }, async (args) => this.handleUpworkGetJob(args));
+    }, async (args) => { await this.ensureReady(); return this.handleUpworkGetJob(args); });
 
     this.server.tool('upwork_get_client', 'Get Upwork client (buyer) profile — total spent, hire rate, jobs posted, rating', {
       clientId: z.string().describe('Upwork client ID from the client URL'),
-    }, async (args) => this.handleUpworkGetClient(args));
+    }, async (args) => { await this.ensureReady(); return this.handleUpworkGetClient(args); });
 
     this.server.tool('upwork_login_capture', 'One-time Upwork authentication. Opens a browser window, waits for manual login (handles 2FA/device verification), captures session cookies to JSON for reuse. Run once per ~2-3 weeks when the session expires. Other upwork_* tools depend on this having been run.', {
       timeoutMinutes: z.number().optional().describe('Max minutes to wait for login completion (default: 5)'),
-    }, async (args) => this.handleUpworkLoginCapture(args));
+    }, async (args) => { await this.ensureReady(); return this.handleUpworkLoginCapture(args); });
 
     logger.info('All tools registered');
   }
