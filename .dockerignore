@@ -1,11 +1,11 @@
 node_modules
-src
+dist
 tests
 test
 .git
 screenshots
 data
-*.md
 .eslintrc*
 .prettierrc*
-tsconfig.json
+.env
+test-tmp-archive

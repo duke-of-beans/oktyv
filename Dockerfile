@@ -1,3 +1,15 @@
+FROM node:20-slim AS builder
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts && \
+    npm rebuild better-sqlite3 2>/dev/null || true
+COPY src/ ./src/
+COPY tsconfig.json ./
+RUN npx tsc && \
+    node --input-type=commonjs -e "const{cpSync,readdirSync,statSync,mkdirSync}=require('fs');const p=require('path');function walk(d,r=[]){readdirSync(d).forEach(f=>{const fp=p.join(d,f);statSync(fp).isDirectory()?walk(fp,r):fp.match(/\.(sql|html|css|txt)$/)&&r.push(fp)});return r}walk('src').forEach(f=>{const d=f.replace(/^src/,'dist');mkdirSync(p.dirname(d),{recursive:true});cpSync(f,d);console.log('asset:',f)})"
+
+# ── Production image ──────────────────────────────────────────────────────
 FROM node:20-slim
 
 # Chromium dependencies for Puppeteer
@@ -19,7 +31,6 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# Skip Puppeteer's Chromium download — use system Chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV OKTYV_MODE=asuriq
@@ -27,17 +38,14 @@ ENV OKTYV_DATA_DIR=/tmp/oktyv
 
 WORKDIR /app
 
-# Install production deps only. better-sqlite3 may fail on Linux
-# (fine — asuriq mode uses Supabase for cron). @napi-rs/keyring
-# also optional (vault not used in asuriq mode).
+# Production deps only
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && \
     npm rebuild better-sqlite3 2>/dev/null || true
 
-# Copy compiled output
-COPY dist/ ./dist/
+# Copy compiled output from builder
+COPY --from=builder /app/dist/ ./dist/
 
-# Create temp directories
 RUN mkdir -p /tmp/oktyv/screenshots/temp
 
 EXPOSE 8080
