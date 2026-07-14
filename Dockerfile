@@ -1,4 +1,5 @@
 FROM node:20-slim AS builder
+ENV NODE_ENV=development
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
