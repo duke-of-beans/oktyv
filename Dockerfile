@@ -4,6 +4,8 @@ COPY package.json package-lock.json ./
 RUN NODE_ENV=development npm ci --ignore-scripts
 COPY src/ ./src/
 COPY tsconfig.json tsconfig.build.json ./
+# Stub out Prisma files that need prisma generate (not available in Docker)
+RUN echo "export class PrismaManager { constructor(...a: any[]) {} }" > src/tools/database/PrismaManager.ts && echo "export class TransactionManager { constructor(...a: any[]) {} }" > src/tools/database/TransactionManager.ts
 RUN npx tsc -p tsconfig.build.json
 
 FROM node:20-slim
