@@ -1,7 +1,7 @@
 FROM node:20-slim AS builder
 WORKDIR /build
 COPY package.json package-lock.json ./
-RUN NODE_ENV=development npm ci --ignore-scripts
+RUN NODE_ENV=development npm ci --ignore-scripts && npx prisma generate
 COPY src/ ./src/
 COPY tsconfig.json ./
 RUN npm run build
