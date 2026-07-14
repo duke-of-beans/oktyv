@@ -1,8 +1,7 @@
 FROM node:20-slim AS builder
-ENV NODE_ENV=development
 WORKDIR /build
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+RUN NODE_ENV=development npm ci --ignore-scripts
 COPY src/ ./src/
 COPY tsconfig.json ./
 RUN npm run build
