@@ -99,7 +99,6 @@ export class OktyvServer {
       { ApiEngine },
       { EmailEngine },
       { CronEngine },
-      { DatabaseEngine },
       { ensureScreenshotsBaseExists },
     ] = await Promise.all([
       import('./browser/session.js'),
@@ -109,7 +108,6 @@ export class OktyvServer {
       import('./tools/api/ApiEngine.js'),
       import('./tools/email/EmailEngine.js'),
       import('./tools/cron/CronEngine.js'),
-      import('./tools/database/DatabaseEngine.js'),
       import('./browser/session-manager.js'),
     ]);
 
@@ -136,7 +134,7 @@ export class OktyvServer {
         serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
       }) as any; // SupabaseCronEngine matches CronEngine's public API
 
-      this.databaseEngine = new DatabaseEngine(noVault);
+      // DatabaseEngine skipped in asuriq mode (Prisma dependency)
 
       // Skip: vault, file, job scrapers, parallel, shell, OneDrive
       // These remain undefined — their tools aren't registered so handlers won't be called
@@ -152,6 +150,7 @@ export class OktyvServer {
         { ParallelExecutionEngine },
         { ShellEngine },
         { OneDriveEngine },
+        { DatabaseEngine },
       ] = await Promise.all([
         import('./connectors/linkedin.js'),
         import('./connectors/wellfound.js'),
@@ -162,6 +161,7 @@ export class OktyvServer {
         import('./engines/parallel/ParallelExecutionEngine.js'),
         import('./engines/shell/ShellEngine.js'),
         import('./tools/onedrive/OneDriveEngine.js'),
+        import('./tools/database/DatabaseEngine.js'),
       ]);
 
       this.linkedInConnector = new LinkedInConnector(this.sessionManager, this.rateLimiter);
