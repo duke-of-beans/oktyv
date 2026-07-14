@@ -129,10 +129,12 @@ export class OktyvServer {
       this.apiEngine = new ApiEngine(noVault, noVault as any);
       this.emailEngine = new EmailEngine(noVault, (url: string, options?: any) => this.apiEngine.request(url, options));
 
-      // Cron: Supabase-backed store (Task 4)
-      // For now, use SQLite-less CronEngine — SupabaseCronStore TBD in Task 4
-      const cronDbPath = '/tmp/oktyv/cron.db'; // will be replaced by Supabase store
-      this.cronEngine = new CronEngine(cronDbPath);
+      // Cron: Supabase-backed store — no SQLite needed
+      const { SupabaseCronEngine } = await import('./tools/cron/SupabaseCronEngine.js');
+      this.cronEngine = new SupabaseCronEngine({
+        supabaseUrl: process.env.SUPABASE_URL!,
+        serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      }) as any; // SupabaseCronEngine matches CronEngine's public API
 
       this.databaseEngine = new DatabaseEngine(noVault);
 
