@@ -20,9 +20,16 @@ const logger = createLogger('temp-session-manager');
 
 /**
  * Root directory for all temporary screenshot sessions.
- * NEVER write to C:\ — all paths must be under D:\
+ * Platform-aware: uses OKTYV_DATA_DIR env var on Linux/Railway,
+ * falls back to D:/Dev/oktyv on Windows (local mode).
  */
-export const SCREENSHOTS_BASE = 'D:/Dev/oktyv/screenshots/temp';
+function resolveScreenshotsBase(): string {
+  const dataDir = process.env.OKTYV_DATA_DIR;
+  if (dataDir) return `${dataDir}/screenshots/temp`.replace(/\\/g, '/');
+  if (process.platform === 'win32') return 'D:/Dev/oktyv/screenshots/temp';
+  return '/tmp/oktyv/screenshots/temp';
+}
+export const SCREENSHOTS_BASE = resolveScreenshotsBase();
 
 /**
  * Ensure the screenshots/temp root directory exists.

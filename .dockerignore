@@ -1,0 +1,11 @@
+node_modules
+src
+tests
+test
+.git
+screenshots
+data
+*.md
+.eslintrc*
+.prettierrc*
+tsconfig.json

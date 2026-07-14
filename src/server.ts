@@ -23,6 +23,7 @@ import type { WellfoundConnector } from './connectors/wellfound.js';
 import type { GenericBrowserConnector } from './connectors/generic.js';
 import type { JobSearchParams } from './types/job.js';
 import { OktyvErrorCode } from './types/mcp.js';
+import { shouldRegisterTool, isAsuriqMode } from './config/tool-sets.js';
 import type { VaultEngine } from './tools/vault/VaultEngine.js';
 import type { FileEngine } from './tools/file/FileEngine.js';
 import type { ApiEngine } from './tools/api/ApiEngine.js';
@@ -33,6 +34,7 @@ import type { IndeedConnector } from './connectors/indeed.js';
 import type { UpworkConnector } from './connectors/upwork.js';
 import type { ParallelExecutionEngine } from './engines/parallel/ParallelExecutionEngine.js';
 import type { ShellEngine } from './engines/shell/ShellEngine.js';
+import type { OneDriveEngine } from './tools/onedrive/OneDriveEngine.js';
 import type { VisualInspectionConnector } from './connectors/visual-inspection.js';
 
 const logger = createLogger('server');
@@ -56,6 +58,7 @@ export class OktyvServer {
   private upworkConnector!: UpworkConnector;
   private parallelEngine!: ParallelExecutionEngine;
   private shellEngine!: ShellEngine;
+  private oneDriveEngine!: OneDriveEngine;
 
   /** Resolves when all heavy deps are loaded and engines instantiated. */
   private _enginesReady: Promise<void>;
@@ -84,52 +87,34 @@ export class OktyvServer {
    */
   private async _initEngines(): Promise<void> {
     const t0 = Date.now();
-    console.error('[Oktyv] Loading engines...');
+    const asuriq = isAsuriqMode();
+    console.error(`[Oktyv] Loading engines (mode: ${asuriq ? 'asuriq' : 'local'})...`);
 
-    // Dynamic imports — these are the heavy deps (puppeteer, cheerio, etc.)
+    // ── Core engines (always loaded) ──────────────────────────────────────
     const [
       { BrowserSessionManager },
       { RateLimiter },
-      { LinkedInConnector },
-      { WellfoundConnector },
       { GenericBrowserConnector },
       { VisualInspectionConnector },
-      { VaultEngine },
-      { FileEngine },
       { ApiEngine },
       { EmailEngine },
       { CronEngine },
       { DatabaseEngine },
-      { IndeedConnector },
-      { UpworkConnector },
-      { ParallelExecutionEngine },
-      { ShellEngine },
       { ensureScreenshotsBaseExists },
     ] = await Promise.all([
       import('./browser/session.js'),
       import('./browser/rate-limiter.js'),
-      import('./connectors/linkedin.js'),
-      import('./connectors/wellfound.js'),
       import('./connectors/generic.js'),
       import('./connectors/visual-inspection.js'),
-      import('./tools/vault/VaultEngine.js'),
-      import('./tools/file/FileEngine.js'),
       import('./tools/api/ApiEngine.js'),
       import('./tools/email/EmailEngine.js'),
       import('./tools/cron/CronEngine.js'),
       import('./tools/database/DatabaseEngine.js'),
-      import('./connectors/indeed.js'),
-      import('./connectors/upwork.js'),
-      import('./engines/parallel/ParallelExecutionEngine.js'),
-      import('./engines/shell/ShellEngine.js'),
       import('./browser/session-manager.js'),
     ]);
 
-    // Instantiate everything (same logic as old constructor)
     this.sessionManager = new BrowserSessionManager();
     this.rateLimiter = new RateLimiter();
-    this.linkedInConnector = new LinkedInConnector(this.sessionManager, this.rateLimiter);
-    this.wellfoundConnector = new WellfoundConnector(this.sessionManager, this.rateLimiter);
     this.genericConnector = new GenericBrowserConnector(this.sessionManager, this.rateLimiter);
     this.visualConnector = new VisualInspectionConnector(this.sessionManager, this.rateLimiter);
 
@@ -137,36 +122,84 @@ export class OktyvServer {
       logger.warn('Could not create screenshots base dir', { err })
     );
 
-    this.vaultEngine = new VaultEngine();
-    this.apiEngine = new ApiEngine(
-      (vaultName: string, key: string) => this.vaultEngine.get(vaultName, key),
-      (vaultName: string, key: string, value: string) => this.vaultEngine.set(vaultName, key, value)
-    );
-    this.emailEngine = new EmailEngine(
-      (vault: string, key: string) => this.vaultEngine.get(vault, key),
-      (url: string, options?: any) => this.apiEngine.request(url, options)
-    );
+    if (asuriq) {
+      // ── ASURIQ mode: no vault, BYOK only ──────────────────────────────
+      // ApiEngine without vault (BYOK — creds come per-request)
+      const noVault = () => { throw new Error('Vault not available in asuriq mode'); };
+      this.apiEngine = new ApiEngine(noVault, noVault as any);
+      this.emailEngine = new EmailEngine(noVault, (url: string, options?: any) => this.apiEngine.request(url, options));
 
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const cronDbPath = path.join(__dirname, '..', 'data', 'cron.db');
-    this.cronEngine = new CronEngine(cronDbPath);
+      // Cron: Supabase-backed store (Task 4)
+      // For now, use SQLite-less CronEngine — SupabaseCronStore TBD in Task 4
+      const cronDbPath = '/tmp/oktyv/cron.db'; // will be replaced by Supabase store
+      this.cronEngine = new CronEngine(cronDbPath);
 
-    this.databaseEngine = new DatabaseEngine(
-      (vault: string, key: string) => this.vaultEngine.get(vault, key)
-    );
+      this.databaseEngine = new DatabaseEngine(noVault);
 
-    this.indeedConnector = new IndeedConnector(this.sessionManager, this.rateLimiter);
-    this.upworkConnector = new UpworkConnector(this.sessionManager, this.rateLimiter);
-    this.fileEngine = new FileEngine();
+      // Skip: vault, file, job scrapers, parallel, shell, OneDrive
+      // These remain undefined — their tools aren't registered so handlers won't be called
+    } else {
+      // ── Local mode: full engine set ────────────────────────────────────
+      const [
+        { LinkedInConnector },
+        { WellfoundConnector },
+        { VaultEngine },
+        { FileEngine },
+        { IndeedConnector },
+        { UpworkConnector },
+        { ParallelExecutionEngine },
+        { ShellEngine },
+        { OneDriveEngine },
+      ] = await Promise.all([
+        import('./connectors/linkedin.js'),
+        import('./connectors/wellfound.js'),
+        import('./tools/vault/VaultEngine.js'),
+        import('./tools/file/FileEngine.js'),
+        import('./connectors/indeed.js'),
+        import('./connectors/upwork.js'),
+        import('./engines/parallel/ParallelExecutionEngine.js'),
+        import('./engines/shell/ShellEngine.js'),
+        import('./tools/onedrive/OneDriveEngine.js'),
+      ]);
 
-    const toolRegistry = new Map<string, (params: Record<string, any>) => Promise<any>>();
-    this.parallelEngine = new ParallelExecutionEngine(toolRegistry);
-    this.shellEngine = new ShellEngine();
-    this.populateToolRegistry(toolRegistry);
+      this.linkedInConnector = new LinkedInConnector(this.sessionManager, this.rateLimiter);
+      this.wellfoundConnector = new WellfoundConnector(this.sessionManager, this.rateLimiter);
+      this.vaultEngine = new VaultEngine();
+      this.apiEngine = new ApiEngine(
+        (vaultName: string, key: string) => this.vaultEngine.get(vaultName, key),
+        (vaultName: string, key: string, value: string) => this.vaultEngine.set(vaultName, key, value)
+      );
+      this.emailEngine = new EmailEngine(
+        (vault: string, key: string) => this.vaultEngine.get(vault, key),
+        (url: string, options?: any) => this.apiEngine.request(url, options)
+      );
+      this.oneDriveEngine = new OneDriveEngine(
+        (vault: string, key: string) => this.vaultEngine.get(vault, key),
+        (vault: string, key: string, value: string) => this.vaultEngine.set(vault, key, value),
+        (url: string, options?: any) => this.apiEngine.request(url, options)
+      );
+
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      const cronDbPath = path.join(__dirname, '..', 'data', 'cron.db');
+      this.cronEngine = new CronEngine(cronDbPath);
+
+      this.databaseEngine = new DatabaseEngine(
+        (vault: string, key: string) => this.vaultEngine.get(vault, key)
+      );
+
+      this.indeedConnector = new IndeedConnector(this.sessionManager, this.rateLimiter);
+      this.upworkConnector = new UpworkConnector(this.sessionManager, this.rateLimiter);
+      this.fileEngine = new FileEngine();
+
+      const toolRegistry = new Map<string, (params: Record<string, any>) => Promise<any>>();
+      this.parallelEngine = new ParallelExecutionEngine(toolRegistry);
+      this.shellEngine = new ShellEngine();
+      this.populateToolRegistry(toolRegistry);
+    }
 
     console.error(`[Oktyv] Engines ready in ${Date.now() - t0}ms`);
-    logger.info('All engines initialized', { durationMs: Date.now() - t0 });
+    logger.info('All engines initialized', { durationMs: Date.now() - t0, mode: asuriq ? 'asuriq' : 'local' });
   }
 
   /**
@@ -182,6 +215,18 @@ export class OktyvServer {
   // ============================================================================
 
   private registerTools(): void {
+    // In asuriq mode, only register Phase 1 tools (browser, DB, API, email, cron).
+    // Wrap this.server.tool to skip tools not in ASURIQ_TOOLS.
+    const originalTool = this.server.tool.bind(this.server);
+    const guardedTool: typeof this.server.tool = (name: string, ...rest: any[]) => {
+      if (!shouldRegisterTool(name)) {
+        return; // skip this tool in asuriq mode
+      }
+      return (originalTool as any)(name, ...rest);
+    };
+    if (isAsuriqMode()) {
+      (this.server as any).tool = guardedTool;
+    }
 
     // ── LinkedIn ──────────────────────────────────────────────────────────────
 
@@ -586,6 +631,72 @@ export class OktyvServer {
         }).optional(),
       },
       async (args) => { await this.ensureReady(); return this.handleShellBatch(args); },
+    );
+
+    // -- OneDrive Engine -------------------------------------------------------
+
+    this.server.tool(
+      'onedrive_list',
+      'List files and folders in OneDrive at a given path (or under an item id, or the drive root).',
+      {
+        path: z.string().optional().describe('Drive-relative folder path, e.g. "Documents/Reports". Omit for drive root.'),
+        itemId: z.string().optional().describe('List children of this item id instead of a path'),
+      },
+      async (args) => { await this.ensureReady(); return this.handleOneDriveList(args); },
+    );
+
+    this.server.tool(
+      'onedrive_search',
+      'Search OneDrive for files and folders by name or content.',
+      {
+        query: z.string().describe('Search text'),
+      },
+      async (args) => { await this.ensureReady(); return this.handleOneDriveSearch(args); },
+    );
+
+    this.server.tool(
+      'onedrive_read',
+      'Read/download a OneDrive file. Returns UTF-8 text by default, or base64 for binary files.',
+      {
+        path: z.string().optional().describe('Drive-relative file path, e.g. "Documents/notes.txt"'),
+        itemId: z.string().optional().describe('File item id (alternative to path)'),
+        as: z.enum(['text', 'base64']).optional().default('text').describe('Return encoding'),
+      },
+      async (args) => { await this.ensureReady(); return this.handleOneDriveRead(args); },
+    );
+
+    this.server.tool(
+      'onedrive_upload',
+      'Upload a file to OneDrive. Source is one of localPath, contentBase64, or content. Files over 4 MiB use a resumable upload session automatically.',
+      {
+        path: z.string().describe('Destination drive-relative path, e.g. "Backups/data.json"'),
+        localPath: z.string().optional().describe('Local file to upload'),
+        contentBase64: z.string().optional().describe('Base64-encoded file bytes'),
+        content: z.string().optional().describe('Inline UTF-8 text content'),
+      },
+      async (args) => { await this.ensureReady(); return this.handleOneDriveUpload(args); },
+    );
+
+    this.server.tool(
+      'onedrive_delta',
+      'Get changes since the last sync (delta query). Pass a prior deltaLink to page forward.',
+      {
+        path: z.string().optional().describe('Scope the delta to a folder path. Omit for whole drive.'),
+        deltaLink: z.string().optional().describe('A deltaLink/nextLink URL returned by a previous call'),
+      },
+      async (args) => { await this.ensureReady(); return this.handleOneDriveDelta(args); },
+    );
+
+    this.server.tool(
+      'onedrive_mkdir',
+      'Create a folder in OneDrive under an optional parent path or item id.',
+      {
+        name: z.string().describe('New folder name'),
+        parentPath: z.string().optional().describe('Parent folder path. Omit for drive root.'),
+        parentId: z.string().optional().describe('Parent item id (alternative to parentPath)'),
+        conflict: z.enum(['rename', 'replace', 'fail']).optional().default('rename').describe('Conflict behavior if folder exists'),
+      },
+      async (args) => { await this.ensureReady(); return this.handleOneDriveMkdir(args); },
     );
 
     // -- API Engine -----------------------------------------------------------
@@ -1302,6 +1413,76 @@ export class OktyvServer {
   // Handler Methods — File Engine
   // ============================================================================
 
+  // ============================================================================
+  // Handler Methods — OneDrive Engine
+  // ============================================================================
+
+  private async handleOneDriveList(args: any): Promise<any> {
+    try {
+      logger.info('Handling onedrive_list');
+      const items = await this.oneDriveEngine.list({ path: args.path, itemId: args.itemId });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, count: items.length, items }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('onedrive_list failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || 'ONEDRIVE_ERROR', message: error.message || 'onedrive_list failed' } }, null, 2) }] };
+    }
+  }
+
+  private async handleOneDriveSearch(args: any): Promise<any> {
+    try {
+      logger.info('Handling onedrive_search');
+      const items = await this.oneDriveEngine.search(args.query);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, count: items.length, items }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('onedrive_search failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || 'ONEDRIVE_ERROR', message: error.message || 'onedrive_search failed' } }, null, 2) }] };
+    }
+  }
+
+  private async handleOneDriveRead(args: any): Promise<any> {
+    try {
+      logger.info('Handling onedrive_read');
+      const result = await this.oneDriveEngine.read({ path: args.path, itemId: args.itemId, as: args.as });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('onedrive_read failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || 'ONEDRIVE_ERROR', message: error.message || 'onedrive_read failed' } }, null, 2) }] };
+    }
+  }
+
+  private async handleOneDriveUpload(args: any): Promise<any> {
+    try {
+      logger.info('Handling onedrive_upload');
+      const item = await this.oneDriveEngine.upload({ path: args.path, localPath: args.localPath, contentBase64: args.contentBase64, content: args.content });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, item }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('onedrive_upload failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || 'ONEDRIVE_ERROR', message: error.message || 'onedrive_upload failed' } }, null, 2) }] };
+    }
+  }
+
+  private async handleOneDriveDelta(args: any): Promise<any> {
+    try {
+      logger.info('Handling onedrive_delta');
+      const result = await this.oneDriveEngine.delta({ path: args.path, deltaLink: args.deltaLink });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('onedrive_delta failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || 'ONEDRIVE_ERROR', message: error.message || 'onedrive_delta failed' } }, null, 2) }] };
+    }
+  }
+
+  private async handleOneDriveMkdir(args: any): Promise<any> {
+    try {
+      logger.info('Handling onedrive_mkdir');
+      const item = await this.oneDriveEngine.mkdir({ name: args.name, parentPath: args.parentPath, parentId: args.parentId, conflict: args.conflict });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, item }, null, 2) }] };
+    } catch (error: any) {
+      logger.error('onedrive_mkdir failed', { error });
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: { code: error.code || 'ONEDRIVE_ERROR', message: error.message || 'onedrive_mkdir failed' } }, null, 2) }] };
+    }
+  }
+
   private async handleFileCopy(args: any): Promise<any> {
     try {
       logger.info('Handling file_copy', { source: args.source, destination: args.destination });
@@ -1978,6 +2159,12 @@ export class OktyvServer {
     registry.set('db_delete', wrapHandler(this.handleDbDelete));
     registry.set('db_raw_query', wrapHandler(this.handleDbRawQuery));
     registry.set('db_aggregate', wrapHandler(this.handleDbAggregate));
+    registry.set('onedrive_list', wrapHandler(this.handleOneDriveList));
+    registry.set('onedrive_search', wrapHandler(this.handleOneDriveSearch));
+    registry.set('onedrive_read', wrapHandler(this.handleOneDriveRead));
+    registry.set('onedrive_upload', wrapHandler(this.handleOneDriveUpload));
+    registry.set('onedrive_delta', wrapHandler(this.handleOneDriveDelta));
+    registry.set('onedrive_mkdir', wrapHandler(this.handleOneDriveMkdir));
     registry.set('db_disconnect', wrapHandler(this.handleDbDisconnect));
     registry.set('db_transaction', wrapHandler(this.handleDbTransaction));
 
@@ -1988,8 +2175,8 @@ export class OktyvServer {
   // Lifecycle
   // ============================================================================
 
-  async connect(transport: StdioServerTransport): Promise<void> {
-    await this.server.connect(transport);
+  async connect(transport: StdioServerTransport | import('@modelcontextprotocol/sdk/server/streamableHttp.js').StreamableHTTPServerTransport): Promise<void> {
+    await this.server.connect(transport as any);
     logger.info('Server connected to transport');
   }
 
